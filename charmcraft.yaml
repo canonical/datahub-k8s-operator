@@ -1,42 +1,43 @@
 # This file configures Charmcraft.
 # See https://juju.is/docs/sdk/charmcraft-config for guidance.
 
-# (Required)
-name: datahub-k8s-operator
-
-
-# (Required)
+name: datahub-k8s
 type: charm
-
-
-# (Recommended)
-title: Charm Template
-
-
-# (Required)
-summary: A very short one-line summary of the charm.
-
-
-# (Required)
+title: DataHub
+summary: DataHub operator
 description: |
-  A single sentence that says what the charm is, concisely and memorably.
+  DataHub is an extensible data catalog that enables data discovery, data observability
+  and federated data governance.
 
-  A paragraph of one to three short sentences, that describe what the charm does.
+  DataHub provides a service that can integrate with metadata sources such as PostgreSQL
+  and Kafka after which metadata such as tables, topics, schema and lineage is gathered
+  and served.
 
-  A third paragraph that explains what need the charm meets.
+  It is useful for keeping track of schema, ownership and dependency information in data
+  warehouses and pipelines.
 
-  Finally, a paragraph that describes whom the charm is useful for.
+
+assumes:
+  - juju >= 3.3
 
 
-# (Required for 'charm' type)
 bases:
   - build-on:
     - name: ubuntu
       channel: "22.04"
+      architectures:
+      - amd64
     run-on:
     - name: ubuntu
       channel: "22.04"
+      architectures:
+      - amd64
 
+
+# TODO (mertalpt): Add dependencies as relations.
+peers:
+  peer:
+    interface: datahub
 
 # (Optional) Configuration options for the charm
 # This config section defines charm config options, and populates the Configure
@@ -60,18 +61,37 @@ config:
 
 # Your workload’s containers.
 containers:
-  some-container:
-    resource: some-container-image
+  datahub-actions:
+    resource: datahub-actions
+  datahub-frontend:
+    resource: datahub-frontend
+  datahub-gms:
+    resource: datahub-gms
+  datahub-mae-consumer:
+    resource: datahub-mae-consumer
+  datahub-mce-consumer:
+    resource: datahub-mce-consumer
 
 
 # This field populates the Resources tab on Charmhub.
 resources:
-  # An OCI image resource for each container listed above.
-  # You may remove this if your charm will run without a workload sidecar container.
-  some-container-image:
+  datahub-actions:
     type: oci-image
-    description: OCI image for the 'some-container' container
-    # The upstream-source field is ignored by Juju. It is included here as a reference
-    # so the integration testing suite knows which image to deploy during testing. This field
-    # is also used by the 'canonical/charming-actions' Github action for automated releasing.
-    upstream-source: some-repo/some-image:some-tag
+    description: OCI image for DataHub Actions
+    upstream-source: acryldata/datahub-actions:v0.0.15
+  datahub-frontend:
+    type: oci-image
+    description: OCI image for DataHub Frontend
+    upstream-source: acryldata/datahub-frontend-react:v0.13.3
+  datahub-gms:
+    type: oci-image
+    description: OCI image for DataHub GMS
+    upstream-source: acryldata/datahub-gms:v0.13.3
+  datahub-mae-consumer:
+    type: oci-image
+    description: OCI image for DataHub MAE Consumer
+    upstream-source: acryldata/datahub-mae-consumer:v0.13.3
+  datahub-mce-consumer:
+    type: oci-image
+    description: OCI image for DataHub MCE Consumer
+    upstream-source: acryldata/datahub-mce-consumer:v0.13.3
