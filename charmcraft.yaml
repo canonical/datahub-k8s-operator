@@ -34,10 +34,31 @@ bases:
       - amd64
 
 
-# TODO (mertalpt): Add dependencies as relations.
+parts:
+  charm:
+    charm-binary-python-packages:
+      - pydantic-core
+    build-packages:
+      - rustc
+      - cargo
+
 peers:
   peer:
     interface: datahub
+    
+requires:
+  db:
+    interface: postgresql_client
+    limit: 1
+
+  kafka:
+    interface: kafka_client
+    limit: 1
+
+  opensearch:
+    interface: opensearch_client
+    limit: 1
+
 
 # (Optional) Configuration options for the charm
 # This config section defines charm config options, and populates the Configure
@@ -46,13 +67,20 @@ peers:
 # General configuration documentation: https://juju.is/docs/sdk/config
 config:
   options:
-    # An example config option to customise the log level of the workload
-    log-level:
-      description: |
-        Configures the log level of gunicorn.
+    encryption-keys-secret-id:
+      description: Juju secret ID for the Frontand and GMS encryption keys.
+      type: string
 
-        Acceptable values are: "info", "debug", "warning", "error" and "critical"
-      default: "info"
+    oidc-secret-id:
+      description: Juju secret ID for the OIDC authentication secrets.
+      type: string
+
+    kafka-topic-prefix:
+      description: Prefix for the names of Kafka topics created and used by DataHub.
+      type: string
+
+    opensearch-index-prefix:
+      description: Prefix for the names of Opensearch indices created and used by DataHub.
       type: string
 
 
@@ -67,10 +95,14 @@ containers:
     resource: datahub-frontend
   datahub-gms:
     resource: datahub-gms
-  datahub-mae-consumer:
-    resource: datahub-mae-consumer
-  datahub-mce-consumer:
-    resource: datahub-mce-consumer
+  datahub-kafka-setup:
+    resource: datahub-kafka-setup
+  datahub-opensearch-setup:
+    resource: datahub-opensearch-setup
+  datahub-postgresql-setup:
+    resource: datahub-postgresql-setup
+  datahub-upgrade:
+    resource: datahub-upgrade
 
 
 # This field populates the Resources tab on Charmhub.
@@ -87,11 +119,19 @@ resources:
     type: oci-image
     description: OCI image for DataHub GMS
     upstream-source: acryldata/datahub-gms:v0.13.3
-  datahub-mae-consumer:
+  datahub-kafka-setup:
     type: oci-image
-    description: OCI image for DataHub MAE Consumer
-    upstream-source: acryldata/datahub-mae-consumer:v0.13.3
-  datahub-mce-consumer:
+    description: OCI image for initialization scripts of Kafka
+    upstream-source: acryldata/datahub-kafka-setup:v0.13.3
+  datahub-opensearch-setup:
     type: oci-image
-    description: OCI image for DataHub MCE Consumer
-    upstream-source: acryldata/datahub-mce-consumer:v0.13.3
+    description: OCI image for initialization scripts of Opensearch
+    upstream-source: acryldata/datahub-elasticsearch-setup:v0.13.3
+  datahub-postgresql-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of PostgreSQL
+    upstream-source: acryldata/datahub-postgres-setup:v0.13.3
+  datahub-upgrade:
+    type: oci-image
+    description: OCI image for initialization scripts of DataHub
+    upstream-source: acryldata/datahub-upgrade:v0.13.3
