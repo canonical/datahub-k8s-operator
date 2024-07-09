@@ -34,10 +34,23 @@ bases:
       - amd64
 
 
-# TODO (mertalpt): Add dependencies as relations.
 peers:
   peer:
     interface: datahub
+    
+requires:
+  db:
+    interface: postgresql_client
+    limit: 1
+
+  kafka:
+    interface: kafka_client
+    limit: 1
+
+  opensearch:
+    interface: opensearch_client
+    limit: 1
+
 
 # (Optional) Configuration options for the charm
 # This config section defines charm config options, and populates the Configure
@@ -46,13 +59,36 @@ peers:
 # General configuration documentation: https://juju.is/docs/sdk/config
 config:
   options:
-    # An example config option to customise the log level of the workload
     log-level:
       description: |
-        Configures the log level of gunicorn.
+        Configures the log level.
 
-        Acceptable values are: "info", "debug", "warning", "error" and "critical"
-      default: "info"
+        Acceptable values are: "INFO", "DEBUG", "WARNING", "ERROR" and "FATAL"
+      default: "INFO"
+      type: string
+    
+    enable-mae-consumer:
+      description: Whether to deploy a standalone MAE Consumer.
+      default: false
+      type: boolean
+
+    enable-mce-consumer:
+      description: Whether to deploy a standalone MCE Consumer.
+      default: false
+      type: boolean
+
+    kafka-topic-prefix:
+      description: Prefix for the names of Kafka topics created and used by DataHub.
+      default: "datahub"
+      type: string
+
+    opensearch-index-prefix:
+      description: Prefix for the names of Opensearch indices created and used by DataHub.
+      default: "datahub"
+      type: string
+
+    datahub-secret-key:
+      description: Secret key for cryptographic functions.
       type: string
 
 
