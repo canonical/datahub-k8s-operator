@@ -70,7 +70,7 @@ DataHub has PostgreSQL, Kafka, and OpenSearch as dependencies. Opensearch only h
 Deploying Opensearch:
 ```shell
 juju switch lxd:datahub-vm
-juju deploy opensearch --channel 2/edge -n 3
+juju deploy opensearch --channel 2/edge -n 2
 juju deploy self-signed-certificates
 juju integrate opensearch self-signed-certificates
 juju offer opensearch:opensearch-client os-client
@@ -104,7 +104,10 @@ juju deploy ./datahub-k8s_ubuntu-22.04-amd64.charm \
 --resource datahub-frontend=acryldata/datahub-frontend-react:v0.13.3 \
 --resource datahub-gms=acryldata/datahub-gms:v0.13.3 \
 --resource datahub-mae-consumer=acryldata/datahub-mae-consumer:v0.13.3 \
---resource datahub-mce-consumer=acryldata/datahub-mce-consumer:v0.13.3
+--resource datahub-mce-consumer=acryldata/datahub-mce-consumer:v0.13.3 \
+--resource datahub-opensearch-setup=acryldata/datahub-elasticsearch-setup:v0.13.3 \
+--resource datahub-kafka-setup=acryldata/datahub-kafka-setup:v0.13.3 \
+--resource datahub-postgresql-setup=acryldata/datahub-postgres-setup:v0.13.3
 ```
 
 Relate it to dependencies:

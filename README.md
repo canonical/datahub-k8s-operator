@@ -1,26 +1,89 @@
-<!--
-Avoid using this README file for information that is maintained or published elsewhere, e.g.:
+# DataHub K8s Operator
 
-* metadata.yaml > published on Charmhub
-* documentation > published on (or linked to from) Charmhub
-* detailed contribution guide > documentation or CONTRIBUTING.md
+This is the Kubernetes operator for [DataHub](https://datahubproject.io/).
 
-Use links instead.
--->
+## Description
 
-# datahub-k8s-operator
+DataHub is an extensible data catalog that enables data discovery, data observability and federated data governance.
 
-Charmhub package name: operator-template
-More information: https://charmhub.io/datahub-k8s-operator
+This operator provides DataHub services on Kubernetes and consists of Python scripts which wrap the [distributions](https://hub.docker.com/u/acryldata) from DataHub.
 
-Describe your charm in one or two sentences.
+## Usage
 
-## Other resources
+Note: This operator requires the use of `juju>=3.3`.
 
-<!-- If your charm is documented somewhere else other than Charmhub, provide a link separately. -->
+The DataHub charm relies on a number of other charms for core functionality:
+- [PostgreSQL](https://charmhub.io/postgresql), for storing metadata.
+- [Kafka](https://charmhub.io/kafka); for ingestion, message passing, and audit logging.
+- [Opensearch](https://charmhub.io/opensearch), for search and graph indexing.
 
-- [Read more](https://example.com)
+The dependencies in-turn have their own dependencies:
+- [Zookeeper](https://charmhub.io/zookeeper), required by Kafka.
+- [Self Signed Certificates](https://charmhub.io/self-signed-certificates), required by Opensearch.
 
-- [Contributing](CONTRIBUTING.md) <!-- or link to other contribution documentation -->
+### Environment Requirements
 
-- See the [Juju SDK documentation](https://juju.is/docs/sdk) for more information about developing and improving charms.
+The DataHub charm requires a multi-cloud setup:
+- DataHub requires a Kubernetes cloud.
+- Kafka and PostgreSQL can be deployed on either a Kubernetes or a machine cloud.
+- Opensearch requires a machine cloud.
+
+A multi-cloud setup can be achieved with a single controller with multiple clouds registered or two controllers with one cloud registered each. Former will work with cross-model relations which are expected to be more stable than the latter's cross-controller relations.
+
+In this guide, we assume that you have a `datahub-vm` machine model on a `lxd` controller and a `datahub-k8s` Kubernetes model on a `k8s` controller. We also assume that you have sufficient expertise on how to create models on different clouds and how to work with `offer`s to adapt the instructions to your situation. For detailed instructions please refer to the [Contributor's Guide](CONTRIBUTING.md).
+
+### Setting Up the Dependencies
+
+```sh
+# Switch to the machine model
+juju switch lxd:datahub-vm
+
+# Deploy applications
+juju deploy postgresql
+juju deploy kafka
+juju deploy zookeeper
+juju deploy opensearch --channel 2/edge -n 2
+juju deploy self-signed-certificates-operator
+
+# Wait for the units to settle
+juju status --watch 3s --color
+
+# Relate
+juju relate kafka zookeeper
+juju relate opensearch self-signed-certificates-operator
+
+# Create named offers
+juju offer postgresql:database pg-client
+juju offer kafka:kafka-client kafka-client
+juju offer opensearch:opensearch-client os-client
+
+# Consume offers from the Kubernetes model
+# These will create named saas
+juju switch k8s:datahub-k8s
+juju consume lxd:admin/datahub-vm.pg-client pg-client
+juju consume lxd:admin/datahub-vm.kafka-client kafka-client
+juju consume lxd:admin/datahub-vm.os-client os-client
+```
+
+### Deploying DataHub
+
+```sh
+# Switch to the Kubernetes model
+juju switch k8s:datahub-k8s
+juju deploy datahub-k8s --config datahub-gms-encryption-secret-key=$GMS_SECRET \
+    datahub-frontend-secret-key=$FE_SECRET
+
+# Wait for the unit to settle
+juju status --watch 3s --color
+
+# Relate
+juju relate datahub-k8s pg-client
+juju relate datahub-k8s kafka-client
+juju relate datahub-k8s os-client
+```
+
+## Contributing
+This charm is still in active development. Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this charm following best practice guidelines, and [CONTRIBUTING.md](CONTRIBUTING.md) for developer guidance.
+
+## License
+The Charmed Superset K8s Operator is free software, distributed under the Apache Software License, version 2.0. See [License](LICENSE) for more details.

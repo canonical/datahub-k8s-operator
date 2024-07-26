@@ -11,8 +11,11 @@ from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseEndpointsChangedEvent,
     IndexCreatedEvent,
 )
+from exceptions import InitializationFailedError
 from log import log_event_handler
-from ops import WaitingStatus, framework
+from ops import MaintenanceStatus, WaitingStatus, framework
+from ops.pebble import APIError, ExecError
+from services import OpensearchSetupService
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +55,50 @@ class OpenSearchRelation(framework.Object):
         self.charm.unit.status = WaitingStatus(f"handling {event.relation.name} change")
         host, port = event.endpoints.split(",", 1)[0].split(":")
 
-        self.charm._state.opensearch_connection = {
-            "host": host,
-            "port": port,
-            "username": event.username,
-            "password": event.password,
-        }
+        if self.charm._state.opensearch_connection is None:
+            self.charm._state.opensearch_connection = {}
+
+        conn = self.charm._state.opensearch_connection
+        conn["host"] = host
+        conn["port"] = port
+        conn["username"] = event.username
+        conn["password"] = event.password
+
+        if conn.get("initialized"):
+            logger.debug("Skipping opensearch initialization")
+            return
+
+        # Re-run idempotent initialization scripts.
+        logger.debug("Running opensearch initialization scripts")
+        self.charm.unit.status = MaintenanceStatus("initializing opensearch")
+        container = self.charm.unit.get_container(OpensearchSetupService.name)
+        stdout, stderr = None, None
+        try:
+            environment = {
+                "ELASTICSEARCH_HOST": conn["host"],
+                "ELASTICSEARCH_PORT": conn["port"],
+                "SKIP_ELASTICSEARCH_CHECK": "false",
+                "ELASTICSEARCH_INSECURE": "false",
+                "ELASTICSEARCH_USE_SSL": "true",
+                "ELASTICSEARCH_USERNAME": conn["username"],
+                "ELASTICSEARCH_PASSWORD": conn["password"],
+                "INDEX_PREFIX": self.charm.config.opensearch_index_prefix,
+                "DATAHUB_ANALYTICS_ENABLED": "true",
+            }
+            process = container.exec(
+                command=["/create-indices.sh"],
+                encoding="utf-8",
+                timeout=600,
+                environment=environment,
+            )
+            process.wait()
+        except (APIError, ExecError):
+            logger.debug("Failed opensearch initialization")
+            logger.debug("stdout: %s, stderr: %s", stdout, stderr)
+            raise InitializationFailedError("failed to initialize opensearch")
+        else:
+            logger.debug("Successful opensearch initialization")
+            conn["initialized"] = True
 
         self.charm._update(event)
 

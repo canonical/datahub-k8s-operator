@@ -34,6 +34,14 @@ bases:
       - amd64
 
 
+parts:
+  charm:
+    charm-binary-python-packages:
+      - pydantic-core
+    build-packages:
+      - rustc
+      - cargo
+
 peers:
   peer:
     interface: datahub
@@ -87,8 +95,12 @@ config:
       default: "datahub"
       type: string
 
-    datahub-secret-key:
-      description: Secret key for cryptographic functions.
+    datahub-gms-secret-encryption-key:
+      description: Secret key for GMS' cryptographic functions.
+      type: string
+
+    datahub-frontend-secret-key:
+      description: Secret key for Frontend's cryptographic functions.
       type: string
 
 
@@ -107,6 +119,12 @@ containers:
     resource: datahub-mae-consumer
   datahub-mce-consumer:
     resource: datahub-mce-consumer
+  datahub-kafka-setup:
+    resource: datahub-kafka-setup
+  datahub-opensearch-setup:
+    resource: datahub-opensearch-setup
+  datahub-postgresql-setup:
+    resource: datahub-postgresql-setup
 
 
 # This field populates the Resources tab on Charmhub.
@@ -131,3 +149,15 @@ resources:
     type: oci-image
     description: OCI image for DataHub MCE Consumer
     upstream-source: acryldata/datahub-mce-consumer:v0.13.3
+  datahub-kafka-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of Kafka
+    upstream-source: acryldata/datahub-kafka-setup:v0.13.3
+  datahub-opensearch-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of Opensearch
+    upstream-source: acryldata/datahub-elasticsearch-setup:v0.13.3
+  datahub-postgresql-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of PostgreSQL
+    upstream-source: acryldata/datahub-postgres-setup:v0.13.3

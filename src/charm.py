@@ -7,15 +7,15 @@
 import logging
 from typing import Dict, List
 
-import applications
+import literals
 import ops
+import services
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
     KafkaRequires,
     OpenSearchRequires,
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
-from literals import DB_NAME
 from log import log_event_handler
 from relations.kafka import KafkaRelation
 from relations.opensearch import OpenSearchRelation
@@ -26,40 +26,45 @@ from structured_config import CharmConfig
 logger = logging.getLogger(__name__)
 
 
-APPLICATIONS: List[applications.AbstractApplication] = [
-    applications.ActionsApplication,
-    applications.FrontendApplication,
-    applications.GMSApplication,
-    applications.MAEConsumerApplication,
-    applications.MCEConsumerApplication,
+SERVICES: List[services.AbstractService] = [
+    services.ActionsService,
+    services.FrontendService,
+    services.GMSService,
+    services.MAEConsumerService,
+    services.MCEConsumerService,
+    services.OpensearchSetupService,
+    services.KafkaSetupService,
+    services.PostgresqlSetupService,
 ]
 
 
-def get_pebble_layer(
-    application: applications.AbstractApplication, context: applications.ApplicationContext
-) -> Dict:
-    """Create pebble layer based on application.
+def get_pebble_layer(service: services.AbstractService, context: services.ServiceContext) -> Dict:
+    """Create pebble layer based on service.
 
     Args:
-        application: Name of DataHub application.
+        service: Name of DataHub service.
         context: Context from which to gather environment to include with the pebble plan.
 
     Returns:
         pebble plan dict.
     """
-    return {
-        "summary": "datahub layer",
+    layer = {
+        "summary": f"DataHub layer for '{service.name}'",
         "services": {
-            application.name: {
-                "summary": application.name,
-                "command": application.command,
-                "startup": "enabled" if application.is_enabled(context) else "disabled",
+            service.name: {
+                "summary": f"DataHub layer for '{service.name}'",
+                "command": service.command,
+                "startup": "enabled" if service.is_enabled(context) else "disabled",
                 "override": "replace",
-                # Included to make configuration changes replan the service.
-                "environment": application.compile_environment(context),
             },
         },
     }
+
+    env = service.compile_environment(context)
+    if env is not None:
+        layer["services"][service.name]["environment"] = env
+
+    return layer
 
 
 class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
@@ -76,26 +81,32 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # TODO (mertalpt): Decide whether to implement or remove this.
         # self.framework.observe(self.on.update_status, self._on_update_status)
 
+        # TODO (mertalpt): Can we make db/topic/index names dynamic to allow
+        # the same dependency to be used by multiple DataHub deployments?
+
         # PostgreSQL
         self.db = DatabaseRequires(
-            self, relation_name="db", database_name=DB_NAME, extra_user_roles="admin"
+            self, relation_name="db", database_name=literals.DB_NAME, extra_user_roles="admin"
         )
         self.db_relation = PostgresqlRelation(self)
 
         # Kafka
         self.kafka = KafkaRequires(
-            self, relation_name="kafka", topic="datahub_dummy", extra_user_roles="admin"
+            self, relation_name="kafka", topic=literals.PLACEHOLDER_TOPIC, extra_user_roles="admin"
         )
         self.kafka_relation = KafkaRelation(self)
 
         # Opensearch
         self.opensearch = OpenSearchRequires(
-            self, relation_name="opensearch", index="datahub_dummy", extra_user_roles="admin"
+            self,
+            relation_name="opensearch",
+            index=literals.PLACEHOLDER_INDEX,
+            extra_user_roles="admin",
         )
         self.opensearch_relation = OpenSearchRelation(self)
 
         # Applications
-        for application in APPLICATIONS:
+        for application in SERVICES:
             self.framework.observe(self.on[application.name].pebble_ready, self._on_pebble_ready)
 
     @log_event_handler(logger)
@@ -138,28 +149,31 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The event triggered when the relation changed.
         """
-        if not self._state.database_connection:
-            self.unit.status = ops.BlockedStatus("missing required db relation")
+        # Check all required relations exist
+        relations = {
+            "db": not bool(self._state.database_connection),
+            "kafka": not bool(self._state.kafka_connection),
+            "opensearch": not bool(self._state.opensearch_connection),
+        }
+
+        if any(relations.values()):
+            missing_relations = [k for (k, v) in relations.items() if v]
+            self.unit.status = ops.BlockedStatus(
+                f"missing required relation(s): {', '.join(missing_relations)}"
+            )
             return
 
-        if not self._state.kafka_connection:
-            self.unit.status = ops.BlockedStatus("missing required kafka relation")
-            return
+        # Update services
+        context = services.ServiceContext(self, self.config)
 
-        if not self._state.opensearch_connection:
-            self.unit.status = ops.BlockedStatus("missing required opensearch relation")
-            return
-
-        context = applications.ApplicationContext(self, self.config)
-
-        for application in APPLICATIONS:
-            container = self.unit.get_container(application.name)
+        for service in SERVICES:
+            container = self.unit.get_container(service.name)
             if not container.can_connect():
                 event.defer()
                 return
 
-            pebble_layer = get_pebble_layer(application, context)
-            container.add_layer(application.name, pebble_layer, combine=True)
+            pebble_layer = get_pebble_layer(service, context)
+            container.add_layer(service.name, pebble_layer, combine=True)
             container.replan()
 
         self.unit.status = ops.ActiveStatus()

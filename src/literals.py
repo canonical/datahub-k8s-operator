@@ -4,3 +4,5 @@
 """Literals."""
 
 DB_NAME = "datahub-k8s_db"
+PLACEHOLDER_INDEX = "datahub_placeholder"
+PLACEHOLDER_TOPIC = "datahub_placeholder"

@@ -4,11 +4,18 @@
 """Define DataHub-Postgresql relation."""
 
 import logging
+from typing import Union
 
-from literals import DB_NAME
+import literals
+from charms.data_platform_libs.v0.data_interfaces import (
+    AuthenticationEvent,
+    DatabaseEndpointsChangedEvent,
+)
+from exceptions import InitializationFailedError
 from log import log_event_handler
-from ops import framework
-from ops.model import WaitingStatus
+from ops import MaintenanceStatus, WaitingStatus, framework
+from ops.pebble import APIError, ExecError
+from services import PostgresqlSetupService
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +37,9 @@ class PostgresqlRelation(framework.Object):
         charm.framework.observe(charm.on.db_relation_broken, self._on_relation_broken)
 
     @log_event_handler(logger)
-    def _on_database_changed(self, event) -> None:
+    def _on_database_changed(
+        self, event: Union[AuthenticationEvent, DatabaseEndpointsChangedEvent]
+    ) -> None:
         """Handle database creation/change events.
 
         Args:
@@ -46,13 +55,47 @@ class PostgresqlRelation(framework.Object):
         self.charm.unit.status = WaitingStatus(f"handling {event.relation.name} change")
         host, port = event.endpoints.split(",", 1)[0].split(":")
 
-        self.charm._state.database_connection = {
-            "dbname": DB_NAME,
-            "host": host,
-            "port": port,
-            "username": event.username,
-            "password": event.password,
-        }
+        if self.charm._state.database_connection is None:
+            self.charm._state.database_connection = {}
+
+        conn = self.charm._state.database_connection
+        conn["dbname"] = literals.DB_NAME
+        conn["host"] = host
+        conn["port"] = port
+        conn["username"] = event.username
+        conn["password"] = event.password
+
+        if conn.get("initialized"):
+            logger.debug("Skipping db initialization")
+            return
+
+        # Re-run idempotent initialization scripts.
+        logger.debug("Running db initizalization scripts")
+        self.charm.unit.status = MaintenanceStatus("initializing db")
+        container = self.charm.unit.get_container(PostgresqlSetupService.name)
+        stdout, stderr = None, None
+        try:
+            environment = {
+                "POSTGRES_USERNAME": conn["username"],
+                "POSTGRES_PASSWORD": conn["password"],
+                "POSTGRES_HOST": conn["host"],
+                "POSTGRES_PORT": conn["port"],
+                "DATAHUB_DB_NAME": conn["dbname"],
+            }
+            process = container.exec(
+                command=["/init.sh"],
+                encoding="utf-8",
+                timeout=300,
+                environment=environment,
+            )
+            stdout, stderr = process.wait_output()
+        except (APIError, ExecError):
+            logger.debug("Failed db initialization")
+            logger.debug("stdout: %s, stderr: %s", stdout, stderr)
+            raise InitializationFailedError("failed to initialize db")
+        else:
+            logger.debug("Successful db initialization")
+            conn["initialized"] = True
 
         self.charm._update(event)
 
