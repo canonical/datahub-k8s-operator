@@ -34,7 +34,7 @@ def _kafka_topic_names(prefix: str) -> Optional[Dict[str, str]]:
     if prefix == "":
         return default_names
 
-    names = {f"{prefix}_{k}": v for (k, v) in default_names.items()}
+    names = {k: f"{prefix}_{v}" for (k, v) in default_names.items()}
     return names
 
 
@@ -85,7 +85,9 @@ class ActionsService(AbstractService):
         Args:
             context: Context for the service.
         """
-        return True
+        kafka_conn = context.charm._state.kafka_connection
+        
+        return kafka_conn and GMSService.is_enabled(context)
 
     @classmethod
     def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
@@ -94,10 +96,10 @@ class ActionsService(AbstractService):
         Args:
             context: Context for the service.
         """
-        kafka_conn = context.charm._state.kafka_connection
-
-        if not kafka_conn:
+        if not cls.is_enabled(context):
             return None
+
+        kafka_conn = context.charm._state.kafka_connection
 
         env = {
             "DATAHUB_GMS_PROTOCOL": "http",
@@ -127,7 +129,10 @@ class FrontendService(AbstractService):
         Args:
             context: Context for the service.
         """
-        return True
+        kafka_conn = context.charm._state.kafka_connection
+        os_conn = context.charm._state.opensearch_connection
+
+        return kafka_conn and os_conn and GMSService.is_enabled(context)
 
     @classmethod
     def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
@@ -136,11 +141,11 @@ class FrontendService(AbstractService):
         Args:
             context: Context for the service.
         """
+        if not cls.is_enabled(context):
+            return None
+
         kafka_conn = context.charm._state.kafka_connection
         os_conn = context.charm._state.opensearch_connection
-
-        if not (kafka_conn and os_conn):
-            return None
 
         env = {
             # TODO (mertalpt): To be implemented with to o11y update.
@@ -184,7 +189,14 @@ class GMSService(AbstractService):
         Args:
             context: Context for the service.
         """
-        return True
+        db_conn = context.charm._state.database_connection
+        kafka_conn = context.charm._state.kafka_connection
+        os_conn = context.charm._state.opensearch_connection
+        return (
+            db_conn.get("initialized")
+            and kafka_conn.get("initialized")
+            and os_conn.get("initialized")
+        )
 
     @classmethod
     def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
@@ -193,14 +205,15 @@ class GMSService(AbstractService):
         Args:
             context: Context for the service.
         """
+        if not cls.is_enabled(context):
+            return None
+
         db_conn = context.charm._state.database_connection
         kafka_conn = context.charm._state.kafka_connection
         os_conn = context.charm._state.opensearch_connection
 
-        if not (db_conn and kafka_conn and os_conn):
-            return None
-
         env = {
+            "EBEAN_DATASOURCE_PORT": db_conn["port"],
             "SHOW_SEARCH_FILTERS_V2": "true",
             "SHOW_BROWSE_V2": "true",
             "BACKFILL_BROWSE_PATHS_V2": "true",
@@ -215,7 +228,7 @@ class GMSService(AbstractService):
             # PostgreSQL credentials.
             "EBEAN_DATASOURCE_USERNAME": db_conn["username"],
             "EBEAN_DATASOURCE_PASSWORD": db_conn["password"],
-            "EBEAN_DATASOURCE_HOST": db_conn["host"],
+            "EBEAN_DATASOURCE_HOST": f"{db_conn['host']}:{db_conn['port']}",
             "EBEAN_DATASOURCE_URL": f"jdbc:postgresql://{db_conn['host']}:{db_conn['port']}/{db_conn['dbname']}",
             "EBEAN_DATASOURCE_DRIVER": "org.postgresql.Driver",
             "KAFKA_BOOTSTRAP_SERVER": kafka_conn["bootstrap_server"],
@@ -228,8 +241,14 @@ class GMSService(AbstractService):
             "SCHEMA_REGISTRY_TYPE": "INTERNAL",
             "ELASTICSEARCH_HOST": os_conn["host"],
             "ELASTICSEARCH_PORT": os_conn["port"],
-            "SKIP_ELASTICSEARCH_CHECK": "false",
+            "SKIP_ELASTICSEARCH_CHECK": "true",
+            # TODO (mertalpt): GMS cannot connect to OS due to unverified certificates.
+            # Potential solution in: https://github.com/datahub-project/datahub/issues/8433
             "ELASTICSEARCH_USE_SSL": "true",
+            "ELASTICSEARCH_SSL_TRUSTSTORE_FILE": "/truststore.p12",
+            "ELASTICSEARCH_SSL_TRUSTSTORE_TYPE": "PKCS12",
+            "ELASTICSEARCH_SSL_TRUSTSTORE_PASSWORD": "foobar",
+            "JAVA_OPTS": "-Djavax.net.ssl.trustStore=/truststore.p12 -Djavax.net.ssl.trustStoreType=PKCS12 -Djavax.net.ssl.trustStorePassword=foobar",
             "ELASTICSEARCH_USERNAME": os_conn["username"],
             "ELASTICSEARCH_PASSWORD": os_conn["password"],
             "INDEX_PREFIX": context.config.opensearch_index_prefix,

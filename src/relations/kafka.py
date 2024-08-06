@@ -7,6 +7,7 @@ import logging
 from typing import Union
 
 import services
+import utils
 from charms.data_platform_libs.v0.data_interfaces import (
     BootstrapServerChangedEvent,
     TopicCreatedEvent,
@@ -70,41 +71,47 @@ class KafkaRelation(framework.Object):
         self.charm.unit.status = MaintenanceStatus("initializing kafka")
         container = self.charm.unit.get_container(KafkaSetupService.name)
         stdout, stderr = None, None
+        environment = {
+            "KAFKA_BOOTSTRAP_SERVER": conn["bootstrap_server"],
+            # The value for this is not actually used in the container.
+            "KAFKA_ZOOKEEPER_CONNECT": "",
+            "MAX_MESSAGE_BYTES": "5242880",
+            "USE_CONFLUENT_SCHEMA_REGISTRY": "false",
+            # TODO (mertalpt): Uncomment and find appropriate values. Might be related to units of Kafka.
+            # "PARTITIONS": "",
+            # "REPLICATION_FACTOR": "",
+            # TODO (mertalpt): Figure out how to switch these based on Kafka's SSL status.
+            "KAFKA_PROPERTIES_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
+            "KAFKA_PROPERTIES_SASL_MECHANISM": "SCRAM-SHA-512",
+            "KAFKA_PROPERTIES_SASL_JAAS_CONFIG": (
+                "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                f'username="{conn["username"]}" password="{conn["password"]}";'
+            ),
+        }
+        topic_names = services._kafka_topic_names(self.charm.config.kafka_topic_prefix)
+        environment.update(topic_names)
+        init_script_path = utils.get_abs_path("src", "scripts", "generic-init.sh")
+        with open(init_script_path, "r") as fp:
+            init_file_content = fp.read()
         try:
-            environment = {
-                "KAFKA_BOOTSTRAP_SERVER": conn["bootstrap_server"],
-                # The value for this is not actually used in the container.
-                "KAFKA_ZOOKEEPER_CONNECT": "",
-                "MAX_MESSAGE_BYTES": "5242880",
-                "USE_CONFLUENT_SCHEMA_REGISTRY": "false",
-                # TODO (mertalpt): Uncomment and find appropriate values. Might be related to units of Kafka.
-                # "PARTITIONS": "",
-                # "REPLICATION_FACTOR": "",
-                # TODO (mertalpt): Figure out how to switch these based on Kafka's SSL status.
-                "KAFKA_PROPERTIES_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
-                "KAFKA_PROPERTIES_SASL_MECHANISM": "SCRAM-SHA-512",
-                "KAFKA_PROPERTIES_SASL_JAAS_CONFIG": (
-                    "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                    f'username="{conn["username"]}" password="{conn["password"]};"'
-                ),
-            }
-            topic_names = services._kafka_topic_names(self.charm.config.kafka_topic_prefix)
-            environment.update(topic_names)
+            container.push("/generic-init.sh", init_file_content, permissions=0o755)
             process = container.exec(
-                command=["/opt/kafka/kafka-setup.sh"],
+                command=["/generic-init.sh", "/opt/kafka/kafka-setup.sh"],
+                working_dir="/opt/kafka",
                 encoding="utf-8",
-                timeout=600,
+                timeout=120,
                 environment=environment,
             )
             stderr, stdout = process.wait_output()
         except (APIError, ExecError):
-            logger.debug("Failed kafka initialization")
-            logger.debug("stdout: %s, stderr: %s", stdout, stderr)
+            logger.debug(
+                "Failed kafka initialization:: stdout: '%s' - stderr: '%s'", stdout, stderr
+            )
             raise InitializationFailedError("failed to initialize kafka")
-        else:
-            logger.debug("Successful kafka initialization")
-            conn["initialized"] = True
 
+        logger.debug("Successful kafka initialization")
+        conn["initialized"] = True
+        self.charm._state.kafka_connection = conn
         self.charm._update(event)
 
     @log_event_handler(logger)

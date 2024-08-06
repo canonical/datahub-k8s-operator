@@ -7,6 +7,7 @@ import logging
 from typing import Union
 
 import literals
+import utils
 from charms.data_platform_libs.v0.data_interfaces import (
     AuthenticationEvent,
     DatabaseEndpointsChangedEvent,
@@ -74,29 +75,32 @@ class PostgresqlRelation(framework.Object):
         self.charm.unit.status = MaintenanceStatus("initializing db")
         container = self.charm.unit.get_container(PostgresqlSetupService.name)
         stdout, stderr = None, None
+        environment = {
+            "POSTGRES_USERNAME": conn["username"],
+            "POSTGRES_PASSWORD": conn["password"],
+            "POSTGRES_HOST": conn["host"],
+            "POSTGRES_PORT": conn["port"],
+            "DATAHUB_DB_NAME": conn["dbname"],
+        }
+        init_script_path = utils.get_abs_path("src", "scripts", "generic-init.sh")
+        with open(init_script_path, "r") as fp:
+            init_file_content = fp.read()
         try:
-            environment = {
-                "POSTGRES_USERNAME": conn["username"],
-                "POSTGRES_PASSWORD": conn["password"],
-                "POSTGRES_HOST": conn["host"],
-                "POSTGRES_PORT": conn["port"],
-                "DATAHUB_DB_NAME": conn["dbname"],
-            }
+            container.push("/generic-init.sh", init_file_content, permissions=0o755)
             process = container.exec(
-                command=["/init.sh"],
+                command=["/generic-init.sh", "/init.sh"],
                 encoding="utf-8",
-                timeout=300,
+                timeout=120,
                 environment=environment,
             )
             stdout, stderr = process.wait_output()
         except (APIError, ExecError):
-            logger.debug("Failed db initialization")
-            logger.debug("stdout: %s, stderr: %s", stdout, stderr)
+            logger.debug("Failed db initialization:: stdout: '%s' - stderr: '%s'", stdout, stderr)
             raise InitializationFailedError("failed to initialize db")
-        else:
-            logger.debug("Successful db initialization")
-            conn["initialized"] = True
 
+        logger.debug("Successful db initialization")
+        conn["initialized"] = True
+        self.charm._state.database_connection = conn
         self.charm._update(event)
 
     @log_event_handler(logger)

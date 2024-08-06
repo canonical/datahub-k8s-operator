@@ -112,6 +112,15 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
         """Handle pebble-ready event."""
+        # Frontend service requires a file to be present at startup.
+        if event.workload.name == services.FrontendService.name:
+            # TODO (mertalpt): Seek to make the default user configurable.
+            event.workload.push(
+                "/etc/datahub/plugins/frontend/auth/user.props",
+                "datahub:datahub",
+                make_dirs=True,
+                permissions=0o644,
+            )
         self._update(event)
 
     @log_event_handler(logger)
@@ -175,6 +184,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             pebble_layer = get_pebble_layer(service, context)
             container.add_layer(service.name, pebble_layer, combine=True)
             container.replan()
+
+        # Ports
+        self.model.unit.set_ports(9002)
 
         self.unit.status = ops.ActiveStatus()
 
