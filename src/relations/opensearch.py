@@ -63,8 +63,8 @@ class OpenSearchRelation(framework.Object):
         conn["password"] = event.password
         conn["tls-ca"] = event.tls_ca
 
-        # TODO (mertalpt): Check if it is possible to attach to an uninitialized Opensearch deployment
-        # without breaking the existing relation first.
+        # TODO (mertalpt): Check if it is possible to attach to an uninitialized
+        # Opensearch deployment without breaking the existing relation first.
         if conn.get("initialized") is None:
             conn["initialized"] = False
 

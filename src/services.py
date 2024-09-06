@@ -3,13 +3,15 @@
 
 """Define DataHub services."""
 
+# pylint: disable=C0302
+
 # TODO (mertalpt): Convert the module to a package and split up services.
 
 # Some General Notes
 # 1. `charm._state` does not behave in the standard Python way, you cannot get a reference
 #    to an object inside it and update it. For lasting updates you need to an assignment with
 #    the updated object.
-# 2. `process.wait()` causes some scripts (i.e. datahub-upgrade) to hang, which is why we use
+# 2. `process.wait()` causes some scripts (i.e. datahub-upgrade) to get stuck, which is why we use
 #    `process.wait_output()` even though we do not read the output. It does not have the same
 #    problem for some reason.
 # 3. Flags in `charm._state` have three states: True, False, None. Logic for them is very specific
@@ -31,13 +33,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _kafka_topic_names(prefix: Optional[str]) -> Optional[Dict[str, str]]:
+def _kafka_topic_names(prefix: str) -> Dict[str, str]:
     """Compiles the environment variables for Kafka topic names.
 
     Args:
         prefix: Prefix to use for the topic names.
+
+    Returns:
+        A dictionary that maps topic names for corresponding environment variables.
     """
-    # Ref: https://github.com/datahub-project/datahub/blob/master/docs/how/kafka-config.md#topic-configuration
+    # Ref: https://github.com/datahub-project/datahub/blob/master/docs/how/kafka-config.md#topic-configuration  # noqa: W505
     # These will be shared across all services unless a conflict is detected.
     # In that case, each service will have environment variables strictly for itself.
     default_names = {
@@ -60,16 +65,26 @@ def _kafka_topic_names(prefix: Optional[str]) -> Optional[Dict[str, str]]:
 
 @dataclass
 class ServiceContext:
-    """Context manager for service methods."""
+    """Context manager for service methods.
+
+    Attributes:
+        charm: Charm instance that runs the services.
+    """
 
     # We can use the charm object straight up instead of having a 'ServiceContext' class.
-    # But, the first implementation used a 'ServiceContext' and I would like to leave an opening for future changes.
-    # TODO (mertalpt): Remove 'noqa' with the CI/CD update.
-    charm: "DatahubK8sOperatorCharm"  # noqa: F821
+    # But, the first implementation used a 'ServiceContext'
+    # and I would like to leave an opening for future changes.
+    charm: "DatahubK8SOperatorCharm"
 
 
 class AbstractService(abc.ABC):
-    """Base class for services."""
+    """Base class for services.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name: str
     command: str
@@ -81,6 +96,9 @@ class AbstractService(abc.ABC):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         return False
 
@@ -90,15 +108,21 @@ class AbstractService(abc.ABC):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
         return False
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         return None
 
@@ -116,7 +140,13 @@ class AbstractService(abc.ABC):
 
 
 class ActionsService(AbstractService):
-    """Service class for DataHub Actions."""
+    """Service class for DataHub Actions.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-actions"
     command = "/bin/sh -c /start_datahub_actions.sh"
@@ -128,6 +158,9 @@ class ActionsService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         return is_ready
@@ -138,6 +171,9 @@ class ActionsService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
         checks = (
             context.charm._state.ran_upgrade,
@@ -147,11 +183,14 @@ class ActionsService(AbstractService):
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         if not cls.is_enabled(context):
             return None
@@ -164,7 +203,8 @@ class ActionsService(AbstractService):
             "DATAHUB_GMS_HOST": "localhost",
             "DATAHUB_GMS_PORT": "8080",
             "KAFKA_BOOTSTRAP_SERVER": kafka_conn["bootstrap_server"],
-            # TODO (mertalpt): This changes when we split services into multiple charms or implement external registry.
+            # TODO (mertalpt): This changes when we split services into multiple charms
+            # or implement external registry.
             "SCHEMA_REGISTRY_URL": "http://localhost:8080/schema-registry/api/",
             "KAFKA_AUTO_OFFSET_POLICY": "latest",
             "KAFKA_PROPERTIES_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
@@ -178,7 +218,13 @@ class ActionsService(AbstractService):
 
 
 class FrontendService(AbstractService):
-    """Service class for DataHub Frontend."""
+    """Service class for DataHub Frontend.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-frontend"
     command = "/bin/sh -c /start.sh"
@@ -193,6 +239,9 @@ class FrontendService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         checks = (context.charm._state.frontend_truststore_initialized is True,)
@@ -204,23 +253,30 @@ class FrontendService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
         checks = (
             context.charm._state.ran_upgrade,
             utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
-            utils.get_from_optional_dict(
-                context.charm._state.opensearch_connection, "initialized"
-            ),
+            utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized"),
             GMSService.is_enabled(context),
         )
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
+
+        Raises:
+            ImproperSecretError: If 'oidc-secret-id' points to a secret with bad contents.
         """
         if not cls.is_enabled(context):
             return None
@@ -274,9 +330,7 @@ class FrontendService(AbstractService):
             content.get("client-id", ""),
             content.get("client-secret", ""),
         ):
-            raise exceptions.ImproperSecretError(
-                "secret pointed to by 'oidc-secret-id' has improper contents"
-            )
+            raise exceptions.ImproperSecretError("secret pointed to by 'oidc-secret-id' has improper contents")
 
         oidc_env = {
             "AUTH_OIDC_ENABLED": "true",
@@ -293,18 +347,19 @@ class FrontendService(AbstractService):
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
-        """Run Frontend initialization script.
+        """Run service specific initialization scripts if service is ready and it is necessary.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
-            logger.debug(
-                "datahub-frontend is not ready to be initialized, skipping initialization"
-            )
+            logger.debug("datahub-frontend is not ready to be initialized, skipping initialization")
             return False
 
         # The only initialization step currently is to set up truststore for Opensearch SSL.
@@ -325,9 +380,7 @@ class FrontendService(AbstractService):
                 literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH,
                 0o755,
             )
-            utils.push_contents_to_file(
-                container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644
-            )
+            utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
                 [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
                 environment={
@@ -338,9 +391,7 @@ class FrontendService(AbstractService):
             process.wait_output()
         except Exception as e:
             logger.debug("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
-            raise exceptions.InitializationFailedError(
-                "failed to initialize truststores for datahub-frontend"
-            )
+            raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
 
         logger.debug("Successful truststore initialization for datahub-frontend")
         context.charm._state.frontend_truststore_initialized = True
@@ -348,7 +399,13 @@ class FrontendService(AbstractService):
 
 
 class GMSService(AbstractService):
-    """Service class for DataHub GMS."""
+    """Service class for DataHub GMS.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-gms"
     command = "/bin/sh -c /datahub/datahub-gms/scripts/start.sh"
@@ -363,6 +420,9 @@ class GMSService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         checks = (context.charm._state.gms_truststore_initialized is True,)
@@ -374,23 +434,27 @@ class GMSService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
         checks = (
             context.charm._state.ran_upgrade,
             utils.get_from_optional_dict(context.charm._state.database_connection, "initialized"),
             utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
-            utils.get_from_optional_dict(
-                context.charm._state.opensearch_connection, "initialized"
-            ),
+            utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized"),
         )
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         if not cls.is_enabled(context):
             return None
@@ -426,7 +490,8 @@ class GMSService(AbstractService):
             "KAFKA_CONSUMER_STOP_ON_DESERIALIZATION_ERROR": "true",
             "KAFKA_PRODUCER_MAX_REQUEST_SIZE": "5242880",
             "KAFKA_CONSUMER_MAX_PARTITION_FETCH_BYTES": "5242880",
-            # TODO (mertalpt): If we ever implement external registry (e.g. Karapace), this needs to change.
+            # TODO (mertalpt): If we ever implement external registry (e.g. Karapace),
+            # then this needs to change.
             "KAFKA_SCHEMAREGISTRY_URL": "http://localhost:8080/schema-registry/api/",
             "SCHEMA_REGISTRY_TYPE": "INTERNAL",
             "SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
@@ -471,13 +536,16 @@ class GMSService(AbstractService):
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
-        """Run GMS initialization script.
+        """Run service specific initialization scripts if service is ready and it is necessary.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
             logger.debug("datahub-gms is not ready to be initialized, skipping initialization")
@@ -501,9 +569,7 @@ class GMSService(AbstractService):
                 literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH,
                 0o755,
             )
-            utils.push_contents_to_file(
-                container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644
-            )
+            utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
                 [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
                 environment={
@@ -514,9 +580,7 @@ class GMSService(AbstractService):
             process.wait_output()
         except Exception as e:
             logger.debug("Failed truststore initialization for datahub-gms: '%s'", str(e))
-            raise exceptions.InitializationFailedError(
-                "failed to initialize truststores for datahub-gms"
-            )
+            raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-gms")
 
         logger.debug("Successful truststore initialization for datahub-gms")
         context.charm._state.gms_truststore_initialized = True
@@ -524,7 +588,13 @@ class GMSService(AbstractService):
 
 
 class OpensearchSetupService(AbstractService):
-    """Service class for Opensearch setup job."""
+    """Service class for Opensearch setup job.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-opensearch-setup"
     # Idle workload, actions will be run on a trigger basis.
@@ -537,6 +607,9 @@ class OpensearchSetupService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         return is_ready
@@ -547,19 +620,22 @@ class OpensearchSetupService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
-        checks = (
-            utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
-            is not None,
-        )
+        checks = (utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized") is not None,)
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         if not cls.is_enabled(context):
             return None
@@ -584,21 +660,23 @@ class OpensearchSetupService(AbstractService):
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
-        """Run Opensearch initialization script.
+        """Run service specific initialization scripts if service is ready and it is necessary.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            InitializationFailedError: If the initialization fails.
+            BadLogicError: If Opensearch is being initialized in an impossible state.
         """
         if not cls.is_ready(context):
             logger.debug("Opensearch is not ready to be initialized, skipping initialization")
             return False
 
-        is_initialized = utils.get_from_optional_dict(
-            context.charm._state.opensearch_connection, "initialized"
-        )
+        is_initialized = utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
         if is_initialized:
             logging.debug("Opensearch is already initialized, skipping initialization")
             return False
@@ -606,6 +684,9 @@ class OpensearchSetupService(AbstractService):
         logger.debug("Running Opensearch initialization")
         container = context.charm.unit.get_container(cls.name)
         environment = cls.compile_environment(context)
+        if environment is None:
+            raise exceptions.BadLogicError("Opensearch is being initialized before it is ready!")
+
         # 'create-indices.sh' requires intervention to initialize Opensearch through SSL
         # That intervention can be in the form of setting an environment variable to let
         # curl use the required certificates.
@@ -618,9 +699,7 @@ class OpensearchSetupService(AbstractService):
             literals.RUNNER_DEST_PATH,
             0o755,
         )
-        utils.push_contents_to_file(
-            container, certificates, literals.OPENSEARCH_CERTIFICATES_PATH, 0o644
-        )
+        utils.push_contents_to_file(container, certificates, literals.OPENSEARCH_CERTIFICATES_PATH, 0o644)
         try:
             logger.debug("Running the initialization script for Opensearch")
             process = container.exec(
@@ -641,7 +720,13 @@ class OpensearchSetupService(AbstractService):
 
 
 class KafkaSetupService(AbstractService):
-    """Service class for Kafka setup job."""
+    """Service class for Kafka setup job.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-kafka-setup"
     # Idle workload, actions will be run on a trigger basis.
@@ -654,6 +739,9 @@ class KafkaSetupService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         return is_ready
@@ -664,19 +752,22 @@ class KafkaSetupService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
-        checks = (
-            utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized")
-            is not None,
-        )
+        checks = (utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized") is not None,)
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         if not cls.is_enabled(context):
             return None
@@ -703,21 +794,22 @@ class KafkaSetupService(AbstractService):
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
-        """Run Kafka initialization script.
+        """Run service specific initialization scripts if service is ready and it is necessary.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
             logger.debug("Kafka is not ready to be initialized, skipping initialization")
             return False
 
-        is_initialized = utils.get_from_optional_dict(
-            context.charm._state.kafka_connection, "initialized"
-        )
+        is_initialized = utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized")
         if is_initialized:
             logging.debug("Kafka is already initialized, skipping initialization")
             return False
@@ -753,7 +845,13 @@ class KafkaSetupService(AbstractService):
 
 
 class PostgresqlSetupService(AbstractService):
-    """Service class for Postgresql setup job."""
+    """Service class for Postgresql setup job.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-postgresql-setup"
     # Idle workload, actions will be run on a trigger basis.
@@ -766,6 +864,9 @@ class PostgresqlSetupService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         return is_ready
@@ -776,19 +877,22 @@ class PostgresqlSetupService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
-        checks = (
-            utils.get_from_optional_dict(context.charm._state.database_connection, "initialized")
-            is not None,
-        )
+        checks = (utils.get_from_optional_dict(context.charm._state.database_connection, "initialized") is not None,)
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         if not cls.is_enabled(context):
             return None
@@ -806,21 +910,22 @@ class PostgresqlSetupService(AbstractService):
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
-        """Run PostgreSQL initialization script.
+        """Run service specific initialization scripts if service is ready and it is necessary.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
             logger.debug("db is not ready to be initialized, skipping initialization")
             return False
 
-        is_initialized = utils.get_from_optional_dict(
-            context.charm._state.database_connection, "initialized"
-        )
+        is_initialized = utils.get_from_optional_dict(context.charm._state.database_connection, "initialized")
         if is_initialized:
             logging.debug("db is already initialized, skipping initialization")
             return False
@@ -855,7 +960,13 @@ class PostgresqlSetupService(AbstractService):
 
 
 class UpgradeService(AbstractService):
-    """Service class for DataHub upgrade job."""
+    """Service class for DataHub upgrade job.
+
+    Attributes:
+        name: Name of the service.
+        command: Command to be executed to run the workload.
+        healthcheck: Optional dictionary for healthcheck configuration.
+    """
 
     name = "datahub-upgrade"
     # Idle workload, actions will be run on a trigger basis.
@@ -868,6 +979,9 @@ class UpgradeService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
         return is_ready
@@ -878,23 +992,26 @@ class UpgradeService(AbstractService):
 
         Args:
             context: Context for the service.
+
+        Returns:
+            Whether the service is ready to be initialized.
         """
         checks = (
-            utils.get_from_optional_dict(context.charm._state.database_connection, "initialized")
-            is not None,
-            utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized")
-            is not None,
-            utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
-            is not None,
+            utils.get_from_optional_dict(context.charm._state.database_connection, "initialized") is not None,
+            utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized") is not None,
+            utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized") is not None,
         )
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
         """Compile service specific environment variables from the context.
 
         Args:
             context: Context for the service.
+
+        Returns:
+            If ready, a dictionary of environment variables for the service.
         """
         if not cls.is_enabled(context):
             return None
@@ -904,7 +1021,7 @@ class UpgradeService(AbstractService):
         os_conn = context.charm._state.opensearch_connection
 
         env = {
-            # From: https://github.com/acryldata/datahub-helm/blob/master/charts/datahub/templates/datahub-upgrade/datahub-system-update-job.yml
+            # From: https://github.com/acryldata/datahub-helm/blob/master/charts/datahub/templates/datahub-upgrade/datahub-system-update-job.yml  # noqa: W505
             "DATAHUB_ANALYTICS_ENABLED": "true",
             "SCHEMA_REGISTRY_SYSTEM_UPDATE": "true",
             "SPRING_KAFKA_PROPERTIES_AUTO_REGISTER_SCHEMAS": "true",
@@ -914,7 +1031,7 @@ class UpgradeService(AbstractService):
             "ELASTICSEARCH_INDEX_BUILDER_MAPPINGS_REINDEX": "true",
             "ELASTICSEARCH_INDEX_BUILDER_SETTINGS_REINDEX": "true",
             "ELASTICSEARCH_BUILD_INDICES_ALLOW_DOC_COUNT_MISMATCH": "false",
-            # From: https://github.com/acryldata/datahub-helm/blob/master/charts/datahub/templates/datahub-upgrade/_upgrade.tpl
+            # From: https://github.com/acryldata/datahub-helm/blob/master/charts/datahub/templates/datahub-upgrade/_upgrade.tpl  # noqa: W505
             "ENTITY_REGISTRY_CONFIG_PATH": "/datahub/datahub-gms/resources/entity-registry.yml",
             "DATAHUB_GMS_HOST": "localhost",
             "DATAHUB_GMS_PORT": "8080",
@@ -927,7 +1044,8 @@ class UpgradeService(AbstractService):
             "KAFKA_PRODUCER_COMPRESSION_TYPE": "none",
             "KAFKA_PRODUCER_MAX_REQUEST_SIZE": "5242880",
             "KAFKA_CONSUMER_MAX_PARTITION_FETCH_BYTES": "5242880",
-            # TODO (mertalpt): If we ever implement external registry (e.g. Karapace), this needs to change.
+            # TODO (mertalpt): If we ever implement external registry (e.g. Karapace),
+            # then this needs to change.
             "KAFKA_SCHEMAREGISTRY_URL": "http://localhost:8080/schema-registry/api/",
             "ELASTICSEARCH_HOST": os_conn["host"],
             "ELASTICSEARCH_PORT": os_conn["port"],
@@ -953,13 +1071,16 @@ class UpgradeService(AbstractService):
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
-        """Run Upgrade initialization scripts.
+        """Run service specific initialization scripts if service is ready and it is necessary.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            InitializationFailedError: If the initialization fails.
         """
         # In order to fit the pattern of services, we loosen the semantics.
         # The "initialization" for 'Upgrade' actually runs an upgrade for the whole ecosystem.
@@ -973,9 +1094,7 @@ class UpgradeService(AbstractService):
             logger.debug("datahub-upgrade truststore is already initialized")
             return False
 
-        check_opensearch = utils.get_from_optional_dict(
-            context.charm._state.opensearch_connection, "initialized"
-        )
+        check_opensearch = utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
         if not check_opensearch:
             logger.debug("Opensearch is not initialized yet, skipping running datahub-upgrade")
             return False
@@ -992,9 +1111,7 @@ class UpgradeService(AbstractService):
                 literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH,
                 0o755,
             )
-            utils.push_contents_to_file(
-                container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644
-            )
+            utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
                 [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
                 environment={
@@ -1005,9 +1122,7 @@ class UpgradeService(AbstractService):
             process.wait_output()
         except Exception as e:
             logger.debug("Failed truststore initialization for datahub-upgrade: '%s'", str(e))
-            raise exceptions.InitializationFailedError(
-                "failed to initialize truststores for datahub-upgrade"
-            )
+            raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-upgrade")
 
         logger.debug("Successful truststore initialization for datahub-upgrade")
         context.charm._state.frontend_truststore_initialized = True
@@ -1044,3 +1159,4 @@ class UpgradeService(AbstractService):
 
         logger.debug("Successful datahub-upgrade run")
         context.charm._state.ran_upgrade = True
+        return True

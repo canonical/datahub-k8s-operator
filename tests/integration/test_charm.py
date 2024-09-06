@@ -2,36 +2,31 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+"""Run integration tests."""
+
 import asyncio
 import logging
-from pathlib import Path
 
 import pytest
-import yaml
+from helpers import APP_NAME, deploy_charm
 from pytest_operator.plugin import OpsTest
 
 logger = logging.getLogger(__name__)
 
-METADATA = yaml.safe_load(Path("./metadata.yaml").read_text())
-APP_NAME = METADATA["name"]
 
+class TestDeployment:
+    """Integration tests for DataHub deployment."""
 
-@pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest):
-    """Build the charm-under-test and deploy it together with related charms.
+    @pytest.mark.abort_on_fail
+    @pytest.mark.usefixtures("charm")
+    async def test_build_and_deploy(self, ops_test: OpsTest, charm: str):
+        """Build the charm-under-test and deploy it by itself.
 
-    Assert on the unit status before any relations/configurations take place.
-    """
-    # Build and deploy charm from local source folder
-    charm = await ops_test.build_charm(".")
-    resources = {
-        "some-container-image": METADATA["resources"]["some-container-image"]["upstream-source"]
-    }
-
-    # Deploy the charm and wait for active/idle status
-    await asyncio.gather(
-        ops_test.model.deploy(charm, resources=resources, application_name=APP_NAME),
-        ops_test.model.wait_for_idle(
-            apps=[APP_NAME], status="active", raise_on_blocked=True, timeout=1000
-        ),
-    )
+        Assert on the unit status before any relations/configurations take place.
+        """
+        # Deploy the charm and wait for blocked/idle status
+        # We expect 'blocked' without dependencies
+        await asyncio.gather(
+            deploy_charm(ops_test, charm),
+            ops_test.model.wait_for_idle(apps=[APP_NAME], status="blocked", timeout=1000),
+        )
