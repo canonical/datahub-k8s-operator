@@ -5,7 +5,7 @@
 """Charm the application."""
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Type, Union
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import (
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 # Ordering of services has the function of setting the initialization priority.
-SERVICES: List[services.AbstractService] = [
+SERVICES: List[Type[services.AbstractService]] = [
     services.PostgresqlSetupService,
     services.KafkaSetupService,
     services.OpensearchSetupService,
@@ -52,24 +52,23 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
     Returns:
         pebble plan dict.
     """
+    svc_dict: Dict[str, Union[str, Dict[str, str]]] = {
+        "summary": f"DataHub layer for '{service.name}'",
+        "command": service.command,
+        "startup": "enabled" if service.is_enabled(context) else "disabled",
+        "override": "replace",
+    }
     layer = {
         "summary": f"DataHub layer for '{service.name}'",
-        "services": {
-            service.name: {
-                "summary": f"DataHub layer for '{service.name}'",
-                "command": service.command,
-                "startup": "enabled" if service.is_enabled(context) else "disabled",
-                "override": "replace",
-            },
-        },
+        "services": svc_dict,
     }
 
     env = service.compile_environment(context)
     if env is not None:
-        layer["services"][service.name]["environment"] = env
+        svc_dict["environment"] = env
 
     if service.healthcheck is not None:
-        layer["services"][service.name].update(
+        svc_dict.update(
             {
                 "on-check-failure": {"up": "ignore"},
             }
@@ -92,11 +91,21 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
 
 
 class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
-    """Charm the application."""
+    """Charm the application.
+
+    Attributes:
+        _state: Used to store persistent data between invocations.
+        config_type: Class used to store the config.
+    """
 
     config_type = CharmConfig
 
     def __init__(self, framework: ops.Framework):
+        """Construct.
+
+        Args:
+            framework: Object to initialize the charm instance.
+        """
         super().__init__(framework)
         self._state = State(self.app, lambda: self.model.get_relation("peer"))
 
@@ -108,9 +117,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # the same dependency to be used by multiple DataHub deployments?
 
         # PostgreSQL
-        self.db = DatabaseRequires(
-            self, relation_name="db", database_name=literals.DB_NAME, extra_user_roles="admin"
-        )
+        self.db = DatabaseRequires(self, relation_name="db", database_name=literals.DB_NAME, extra_user_roles="admin")
         self.db_relation = PostgresqlRelation(self)
 
         # Kafka
@@ -134,7 +141,11 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
     @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
-        """Handle pebble-ready event."""
+        """Handle pebble-ready event.
+
+        Args:
+            event: Event instance being handled.
+        """
         # Actions service requires a file to be altered at startup.
         if event.workload.name == services.ActionsService.name:
             utils.push_file(
@@ -205,6 +216,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """Check the current state of the relations and overall charm readiness.
 
         Raises:
+            ImproperSecretError: If the contents of the secret pointed to by
+                'encryption-keys-secret-id' is malformed.
             UnreadyStateError: In case of invalid configuration or uninitialized relations.
         """
         # Check all required configuration is set.
@@ -220,14 +233,17 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Validate secret schema.
         encryption_keys_secret = self.model.get_secret(id=self.config.encryption_keys_secret_id)
 
-        # TODO (mertalpt): Handle this secret so that the application does not break if it is changed.
+        # TODO (mertalpt): Handle this secret so that the application does not break
+        # if it is changed.
 
         content = encryption_keys_secret.get_content(refresh=True)
         if "" in (
             content.get("gms-key", ""),
             content.get("frontend-key", ""),
         ):
-            raise exceptions.ImproperSecretError("secret pointed to by 'encryption_keys_secret_id' has improper contents")
+            raise exceptions.ImproperSecretError(
+                "secret pointed to by 'encryption-keys-secret-id' has improper contents"
+            )
 
         # Check all required relations exist.
         relations = {
@@ -246,6 +262,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         Args:
             event: The event triggered when the relation changed.
+
+        Raises:
+            Exception: If an initialization fails for an unknown reason.
         """
         try:
             self._check_state()
@@ -263,10 +282,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             for service in SERVICES:
                 service.run_initialization(context)
         except Exception as e:
-            # TODO (mertalpt): This is likely to result in an error loop, can we solve it another way?
-            logger.debug(
-                "Failed to initialize service '%s' due to error: '%s'", service.name, str(e)
-            )
+            # TODO (mertalpt): This is likely to result in an error loop,
+            # can we solve it another way?
+            logger.debug("Failed to initialize service '%s' due to error: '%s'", service.name, str(e))
             raise
 
         # Update services.

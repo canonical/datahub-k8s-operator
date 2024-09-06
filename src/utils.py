@@ -6,6 +6,7 @@
 import logging
 import os
 import random
+import secrets
 import string
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -39,7 +40,7 @@ def push_contents_to_file(container: Any, contents: str, dest_path: str, permiss
     container.push(dest_path, contents, make_dirs=True, permissions=permissions)
 
 
-def push_file(container: Any, src_path: Tuple[str], dest_path: str, permissions: int) -> None:
+def push_file(container: Any, src_path: Tuple[str, ...], dest_path: str, permissions: int) -> None:
     """Push files from the charm directory to the path in the given container.
 
     Args:
@@ -62,23 +63,26 @@ def generate_secret(length: int = 32) -> str:
 
     Returns:
         An alphanumeric string of the specified length.
+
+    Raises:
+        ValueError: If requested length is shorter than 4.
     """
     if length < 4:
-        raise ValueError("Specific secret length '%d' is too short.", length)
+        raise ValueError(f"Specific secret length '{length}' is too short.")
 
     chars = []
 
     # Lower case
-    chars.append(random.choice(string.ascii_lowercase))
+    chars.append(secrets.choice(string.ascii_lowercase))
 
     # Upper case
-    chars.append(random.choice(string.ascii_uppercase))
+    chars.append(secrets.choice(string.ascii_uppercase))
 
     # Digit
-    chars.append(random.choice(string.digits))
+    chars.append(secrets.choice(string.digits))
 
     # Padding
-    chars.extend(random.choices(string.ascii_letters + string.digits, length - 3))
+    chars.extend((secrets.choice(string.ascii_letters + string.digits) for _ in range(length - 3)))
 
     random.shuffle(chars)
     secret = "".join(chars)
@@ -87,7 +91,10 @@ def generate_secret(length: int = 32) -> str:
 
 
 def split_certificates(certificates: str) -> List[str]:
-    """Split a PEM formatted string of potentially multiple certificates into individual certificates.
+    """Split a PEM formatted string into component certificates.
+
+    Split a PEM formatted string of potentially multiple certificates
+    into individual certificates.
 
     Input string is not validated for correctness.
 
@@ -114,6 +121,9 @@ def get_from_optional_dict(dictionary: Optional[Dict], key: str) -> Optional[Any
 
     Returns:
         The value if both the dictionary and the value exists.
+
+    Raises:
+        ValueError: If the input 'dictionary' is not of type 'dict'.
     """
     if dictionary is None:
         return None

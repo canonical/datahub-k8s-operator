@@ -1,0 +1,3 @@
+rules:
+  # Ignore "master" - branch names of repositories in references.
+  - name: master

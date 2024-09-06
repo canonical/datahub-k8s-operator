@@ -35,9 +35,7 @@ class PostgresqlRelation(framework.Object):
         charm.framework.observe(charm.on.db_relation_broken, self._on_relation_broken)
 
     @log_event_handler(logger)
-    def _on_database_changed(
-        self, event: Union[AuthenticationEvent, DatabaseEndpointsChangedEvent]
-    ) -> None:
+    def _on_database_changed(self, event: Union[AuthenticationEvent, DatabaseEndpointsChangedEvent]) -> None:
         """Handle database creation/change events.
 
         Args:
@@ -63,8 +61,8 @@ class PostgresqlRelation(framework.Object):
         conn["username"] = event.username
         conn["password"] = event.password
 
-        # TODO (mertalpt): Check if it is possible to attach to an uninitialized PostgreSQL deployment
-        # without breaking the existing relation first.
+        # TODO (mertalpt): Check if it is possible to attach to an uninitialized
+        # PostgreSQL deployment without breaking the existing relation first.
         if conn.get("initialized") is None:
             conn["initialized"] = False
 

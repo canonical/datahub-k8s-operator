@@ -4,7 +4,6 @@
 """Structured configuration for the charm."""
 
 import logging
-from enum import Enum
 from typing import Optional
 
 from charms.data_platform_libs.v0.data_models import BaseConfigModel
@@ -14,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 
 class CharmConfig(BaseConfigModel):
-    """Manager for the structured configuration."""
+    """Manager for the structured configuration.
+
+    Attributes:
+        encryption_keys_secret_id: Juju secret ID to use for secret keys.
+        oidc_secret_id: Juju secret ID to enable SSO.
+        kafka_topic_prefix: Prefix to use for Kafka topic names.
+        opensearch_index_prefix: Prefix to use for Opensearch indexes.
+    """
 
     encryption_keys_secret_id: str
     oidc_secret_id: Optional[str] = None

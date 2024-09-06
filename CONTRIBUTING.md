@@ -14,7 +14,7 @@ source venv/bin/activate
 This project uses `tox` for managing test environments. There are some pre-configured environments that can be used for linting and formatting code when you're preparing contributions to the charm:
 
 ```shell
-tox run -e format        # update your code according to linting rules
+tox run -e fmt           # update your code according to linting rules
 tox run -e lint          # code style
 tox run -e static        # static type checking
 tox run -e unit          # unit tests
@@ -194,7 +194,7 @@ juju deploy ...
 
 The recommended setup deploys DataHub inside of a VM. Which requires extra work to make it accessible from the host machine where you would have your browser. We can solve this with a few steps.
 
-First, get the IP adress of your `multipass` instance, run this on the host:
+First, get the IP address of your `multipass` instance, run this on the host:
 ```shell
 ❯ multipass info charm-dev
 Name:           charm-dev
@@ -216,7 +216,7 @@ Mounts:         /home/user/Workspaces => ~/Workspaces
 
 We are interested in the first IP address in the list, in this case `10.150.222.16`.
 
-Second, get the IP adress of your `datahub` application, run this in the `multipass` instance:
+Second, get the IP address of your `datahub` application, run this in the `multipass` instance:
 ```shell
 ubuntu@charm-dev:~$ juju status
 Model        Controller  Cloud/Region        Version  SLA          Timestamp
