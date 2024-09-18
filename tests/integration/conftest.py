@@ -6,7 +6,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Union
 
 import helpers
 import pytest_asyncio
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 @pytest_asyncio.fixture(scope="module")
-async def charm(request: FixtureRequest, ops_test: OpsTest) -> Path:
+async def charm(request: FixtureRequest, ops_test: OpsTest) -> Union[str, Path]:
     """Fetch the path to charm, after building it if necessary."""
     charm = request.config.getoption("--charm-file")
     if not charm:
@@ -26,7 +26,7 @@ async def charm(request: FixtureRequest, ops_test: OpsTest) -> Path:
         assert charm, "Charm not built"
     else:
         charm = charm[0]
-    return Path(charm)
+    return charm
 
 
 @pytest_asyncio.fixture(scope="module")
