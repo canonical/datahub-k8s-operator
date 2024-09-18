@@ -359,7 +359,7 @@ class FrontendService(AbstractService):
             InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
-            logger.debug("datahub-frontend is not ready to be initialized, skipping initialization")
+            logger.info("datahub-frontend is not ready to be initialized, skipping initialization")
             return False
 
         # The only initialization step currently is to set up truststore for Opensearch SSL.
@@ -390,10 +390,10 @@ class FrontendService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
+            logger.info("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
 
-        logger.debug("Successful truststore initialization for datahub-frontend")
+        logger.info("Successful truststore initialization for datahub-frontend")
         context.charm._state.frontend_truststore_initialized = True
         return True
 
@@ -548,7 +548,7 @@ class GMSService(AbstractService):
             InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
-            logger.debug("datahub-gms is not ready to be initialized, skipping initialization")
+            logger.info("datahub-gms is not ready to be initialized, skipping initialization")
             return False
 
         # The only initialization step currently is to set up truststore for Opensearch SSL.
@@ -579,10 +579,10 @@ class GMSService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed truststore initialization for datahub-gms: '%s'", str(e))
+            logger.info("Failed truststore initialization for datahub-gms: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-gms")
 
-        logger.debug("Successful truststore initialization for datahub-gms")
+        logger.info("Successful truststore initialization for datahub-gms")
         context.charm._state.gms_truststore_initialized = True
         return True
 
@@ -673,15 +673,15 @@ class OpensearchSetupService(AbstractService):
             BadLogicError: If Opensearch is being initialized in an impossible state.
         """
         if not cls.is_ready(context):
-            logger.debug("Opensearch is not ready to be initialized, skipping initialization")
+            logger.info("Opensearch is not ready to be initialized, skipping initialization")
             return False
 
         is_initialized = utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
         if is_initialized:
-            logging.debug("Opensearch is already initialized, skipping initialization")
+            logger.debug("Opensearch is already initialized, skipping initialization")
             return False
 
-        logger.debug("Running Opensearch initialization")
+        logger.info("Running Opensearch initialization")
         container = context.charm.unit.get_container(cls.name)
         environment = cls.compile_environment(context)
         if environment is None:
@@ -692,7 +692,7 @@ class OpensearchSetupService(AbstractService):
         # curl use the required certificates.
         environment["CURL_CA_BUNDLE"] = literals.OPENSEARCH_CERTIFICATES_PATH
         certificates = context.charm._state.opensearch_connection["tls-ca"]
-        logger.debug("Pushing initialization script for Opensearch")
+        logger.info("Pushing initialization script for Opensearch")
         utils.push_file(
             container,
             literals.RUNNER_SRC_PATH,
@@ -701,7 +701,7 @@ class OpensearchSetupService(AbstractService):
         )
         utils.push_contents_to_file(container, certificates, literals.OPENSEARCH_CERTIFICATES_PATH, 0o644)
         try:
-            logger.debug("Running the initialization script for Opensearch")
+            logger.info("Running the initialization script for Opensearch")
             process = container.exec(
                 command=[literals.RUNNER_DEST_PATH, "/create-indices.sh"],
                 timeout=120,
@@ -709,10 +709,10 @@ class OpensearchSetupService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed Opensearch initialization: '%s'", str(e))
+            logger.info("Failed Opensearch initialization: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize opensearch")
 
-        logger.debug("Successful Opensearch initialization")
+        logger.info("Successful Opensearch initialization")
         conn = context.charm._state.opensearch_connection
         conn["initialized"] = True
         context.charm._state.opensearch_connection = conn
@@ -806,18 +806,18 @@ class KafkaSetupService(AbstractService):
             InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
-            logger.debug("Kafka is not ready to be initialized, skipping initialization")
+            logger.info("Kafka is not ready to be initialized, skipping initialization")
             return False
 
         is_initialized = utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized")
         if is_initialized:
-            logging.debug("Kafka is already initialized, skipping initialization")
+            logger.debug("Kafka is already initialized, skipping initialization")
             return False
 
-        logger.debug("Running Kafka initialization")
+        logger.info("Running Kafka initialization")
         container = context.charm.unit.get_container(cls.name)
         environment = cls.compile_environment(context)
-        logger.debug("Pushing initialization script for Kafka")
+        logger.info("Pushing initialization script for Kafka")
         utils.push_file(
             container,
             literals.RUNNER_SRC_PATH,
@@ -825,7 +825,7 @@ class KafkaSetupService(AbstractService):
             0o744,
         )
         try:
-            logger.debug("Running the initialization script for Kafka")
+            logger.info("Running the initialization script for Kafka")
             process = container.exec(
                 command=[literals.RUNNER_DEST_PATH, "/opt/kafka/kafka-setup.sh"],
                 working_dir="/opt/kafka",
@@ -834,10 +834,10 @@ class KafkaSetupService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed Kafka initialization: '%s'", str(e))
+            logger.info("Failed Kafka initialization: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize kafka")
 
-        logger.debug("Successful Kafka initialization")
+        logger.info("Successful Kafka initialization")
         conn = context.charm._state.kafka_connection
         conn["initialized"] = True
         context.charm._state.kafka_connection = conn
@@ -922,18 +922,18 @@ class PostgresqlSetupService(AbstractService):
             InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
-            logger.debug("db is not ready to be initialized, skipping initialization")
+            logger.info("db is not ready to be initialized, skipping initialization")
             return False
 
         is_initialized = utils.get_from_optional_dict(context.charm._state.database_connection, "initialized")
         if is_initialized:
-            logging.debug("db is already initialized, skipping initialization")
+            logger.debug("db is already initialized, skipping initialization")
             return False
 
-        logger.debug("Running db initialization")
+        logger.info("Running db initialization")
         container = context.charm.unit.get_container(cls.name)
         environment = cls.compile_environment(context)
-        logger.debug("Pushing initialization script for db")
+        logger.info("Pushing initialization script for db")
         utils.push_file(
             container,
             literals.RUNNER_SRC_PATH,
@@ -941,7 +941,7 @@ class PostgresqlSetupService(AbstractService):
             0o744,
         )
         try:
-            logger.debug("Running the initialization script for db")
+            logger.info("Running the initialization script for db")
             process = container.exec(
                 command=[literals.RUNNER_DEST_PATH, "/init.sh"],
                 timeout=120,
@@ -949,10 +949,10 @@ class PostgresqlSetupService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed db initialization: '%s'", str(e))
+            logger.info("Failed db initialization: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize db")
 
-        logger.debug("Successful db initialization")
+        logger.info("Successful db initialization")
         conn = context.charm._state.database_connection
         conn["initialized"] = True
         context.charm._state.database_connection = conn
@@ -1085,7 +1085,7 @@ class UpgradeService(AbstractService):
         # In order to fit the pattern of services, we loosen the semantics.
         # The "initialization" for 'Upgrade' actually runs an upgrade for the whole ecosystem.
         if context.charm._state.ran_upgrade:
-            logger.debug("Already ran datahub-upgrade, skipping initialization")
+            logger.info("Already ran datahub-upgrade, skipping initialization")
             return False
 
         # We need to ensure that the truststore is configured first.
@@ -1096,7 +1096,7 @@ class UpgradeService(AbstractService):
 
         check_opensearch = utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
         if not check_opensearch:
-            logger.debug("Opensearch is not initialized yet, skipping running datahub-upgrade")
+            logger.info("Opensearch is not initialized yet, skipping running datahub-upgrade")
             return False
 
         certificates = context.charm._state.opensearch_connection["tls-ca"]
@@ -1121,13 +1121,13 @@ class UpgradeService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed truststore initialization for datahub-upgrade: '%s'", str(e))
+            logger.info("Failed truststore initialization for datahub-upgrade: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-upgrade")
 
-        logger.debug("Successful truststore initialization for datahub-upgrade")
+        logger.info("Successful truststore initialization for datahub-upgrade")
         context.charm._state.frontend_truststore_initialized = True
 
-        logger.debug("Pushing runner script for datahub-upgrade")
+        logger.info("Pushing runner script for datahub-upgrade")
         utils.push_file(
             container,
             literals.RUNNER_SRC_PATH,
@@ -1136,7 +1136,7 @@ class UpgradeService(AbstractService):
         )
 
         # We run the upgrade job now.
-        logger.debug("Running datahub-upgrade job")
+        logger.info("Running datahub-upgrade job")
         environment = cls.compile_environment(context)
         try:
             process = container.exec(
@@ -1154,9 +1154,9 @@ class UpgradeService(AbstractService):
             )
             process.wait_output()
         except Exception as e:
-            logger.debug("Failed job run for datahub-upgrade: '%s'", str(e))
+            logger.info("Failed job run for datahub-upgrade: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to run jobs for datahub-upgrade")
 
-        logger.debug("Successful datahub-upgrade run")
+        logger.info("Successful datahub-upgrade run")
         context.charm._state.ran_upgrade = True
         return True

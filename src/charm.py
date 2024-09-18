@@ -60,7 +60,9 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
     }
     layer = {
         "summary": f"DataHub layer for '{service.name}'",
-        "services": svc_dict,
+        "services": {
+            service.name: svc_dict,
+        },
     }
 
     env = service.compile_environment(context)
@@ -186,7 +188,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self._update(event)
 
     @log_event_handler(logger)
-    def _on_update_status(self, event):
+    def _on_update_status(self, event):  # noqa C901
         """Handle `update-status` events.
 
         Args:
@@ -194,23 +196,52 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         try:
             self._check_state()
-        except exceptions.UnreadyStateError as err:
+        except (exceptions.UnreadyStateError, exceptions.ImproperSecretError) as err:
             self.unit.status = ops.BlockedStatus(str(err))
             return
 
+        context = services.ServiceContext(self)
+        is_down = False
+        is_invalid = False
+        is_not_ready = False
         for service in SERVICES:
             if service.healthcheck is None:
                 continue
 
-            container = self.unit.get_container(service.name)
-            logger.info("performing up check for '%s'", service.name)
-            check = container.get_check("up")
-            if check.status != CheckStatus.UP:
-                logger.error("up check failed for '%s'", service.name)
-                self.unit.status = ops.MaintenanceStatus("status check: DOWN")
-                return
+            if not service.is_enabled(context):
+                logger.info("service '%s' is not ready", service.name)
+                is_not_ready = True
+                continue
 
-        self.unit.status = ops.ActiveStatus()
+            container = self.unit.get_container(service.name)
+            if not container.can_connect():
+                logger.info("cannot connect to service '%s'")
+                is_not_ready = True
+                continue
+            logger.debug("performing up check for '%s'", service.name)
+            try:
+                check = container.get_check("up")
+            except ops.model.ModelError:
+                logger.info("invalid plan for '%s'", service.name)
+                is_invalid = True
+                continue
+            if check.status != CheckStatus.UP:
+                logger.info("up check failed for '%s'", service.name)
+                is_down = True
+                continue
+            logger.debug("service '%s' is up", service.name)
+
+        if is_invalid:
+            logger.info("invalid plan detected, attempting replanning")
+            self._update(event)
+        elif is_not_ready:
+            logger.info("services not ready, exiting to wait the next update")
+            self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
+        elif is_down:
+            logger.info("services down, exiting to wait the next update")
+            self.unit.status = ops.MaintenanceStatus("status check: DOWN")
+        else:
+            self.unit.status = ops.ActiveStatus()
 
     def _check_state(self):
         """Check the current state of the relations and overall charm readiness.
@@ -280,17 +311,23 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Run initialization jobs.
         try:
             for service in SERVICES:
+                container = self.unit.get_container(service.name)
+                if not container.can_connect():
+                    logger.info("Cannot connect to service '%s', deferring initialization", service.name)
+                    event.defer()
+                    return
                 service.run_initialization(context)
         except Exception as e:
             # TODO (mertalpt): This is likely to result in an error loop,
             # can we solve it another way?
-            logger.debug("Failed to initialize service '%s' due to error: '%s'", service.name, str(e))
+            logger.error("Failed to initialize service '%s' due to error: '%s'", service.name, str(e))
             raise
 
         # Update services.
         for service in SERVICES:
             container = self.unit.get_container(service.name)
             if not container.can_connect():
+                logger.info("Cannot connect to service '%s', deferring replan", service.name)
                 event.defer()
                 return
 
