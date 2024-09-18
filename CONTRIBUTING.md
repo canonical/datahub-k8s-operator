@@ -38,9 +38,9 @@ multipass launch -c 4 -m 16G -d 50G -n charm-dev charm-dev
 multipass shell charm-dev
 # Refer to [1] below for a note.
 juju switch lxd
-juju add-model datahub-vm lxd
+juju add-model datahub-vm
 juju switch microk8s
-juju add-model datahub-k8s microk8s
+juju add-model datahub-k8s
 # Refer to [2] below for a note.
 # Refer to [3] below for a note.
 ```
@@ -82,25 +82,28 @@ DataHub has PostgreSQL, Kafka, and OpenSearch as dependencies. Opensearch only h
 Deploying Opensearch:
 ```shell
 juju switch lxd:datahub-vm
-juju deploy opensearch --channel 2/edge -n 2
+# Less than 3 units might work for a while but is prone to blocking
+juju deploy opensearch --channel 2/edge -n 3
 juju deploy self-signed-certificates
+juju deploy postgresql --channel 14/stable
+juju deploy kafka
+juju deploy zookeeper
 juju integrate opensearch self-signed-certificates
+juju integrate kafka zookeeper
 juju offer opensearch:opensearch-client os-client
-juju deploy postgresql --channel 14/edge
 juju offer postgresql:database pg-client
+juju offer kafka:kafka-client kafka-client
 ```
 
 Deploying other dependencies:
 ```shell
 juju switch microk8s:datahub-k8s
-juju deploy kafka-k8s
-juju deploy zookeeper-k8s
-juju integrate kafka-k8s zookeeper-k8s
 juju consume lxd:admin/datahub-vm.os-client os-client
 juju consume lxd:admin/datahub-vm.pg-client pg-client
+juju consume lxd:admin/datahub-vm.kafka-client kafka-client
 ```
 
-**Note:** In theory, DataHub can work with both VM and K8s versions of Kafka and PostgreSQL charms. The instructions above are what was used during development and offers the most well tested environment.
+**Note:** In theory, DataHub can work with both VM and K8s versions of Kafka and PostgreSQL charms.
 
 ## Build the charm
 
@@ -141,19 +144,19 @@ juju switch microk8s:datahub-k8s
 cd /path/to/charm/dir
 
 # Create a secret for encryption keys
-echo "gms-key: $GMS_SECRET\nfrontend-key: $FE_SECRET\n" > /path/to/secret.yaml
+echo -e "gms-key: $GMS_SECRET\nfrontend-key: $FE_SECRET" > /path/to/secret.yaml
 juju add-secret <secret-name> --file=/path/to/secret.yaml  # copy the ID from the output
 
 # Deploy
 juju deploy ./datahub-k8s_ubuntu-22.04-amd64.charm \
-    --resource datahub-actions=acryldata/datahub-actions:v0.0.15 \
-    --resource datahub-frontend=acryldata/datahub-frontend-react:v0.13.3 \
-    --resource datahub-gms=acryldata/datahub-gms:v0.13.3 \
-    --resource datahub-opensearch-setup=acryldata/datahub-elasticsearch-setup:v0.13.3 \
-    --resource datahub-kafka-setup=acryldata/datahub-kafka-setup:v0.13.3 \
-    --resource datahub-postgresql-setup=acryldata/datahub-postgres-setup:v0.13.3 \
-    --resource datahub-upgrade=acryldata/datahub-upgrade:v0.13.3 \
-    --config encryption-keys-secret-id=<secret-id>
+--resource datahub-actions=acryldata/datahub-actions:v0.0.15 \
+--resource datahub-frontend=acryldata/datahub-frontend-react:v0.13.3 \
+--resource datahub-gms=acryldata/datahub-gms:v0.13.3 \
+--resource datahub-opensearch-setup=acryldata/datahub-elasticsearch-setup:v0.13.3 \
+--resource datahub-kafka-setup=acryldata/datahub-kafka-setup:v0.13.3 \
+--resource datahub-postgresql-setup=acryldata/datahub-postgres-setup:v0.13.3 \
+--resource datahub-upgrade=acryldata/datahub-upgrade:v0.13.3 \
+--config encryption-keys-secret-id=<secret-id>
 ```
 
 **Note:** The configuration variables need to be set at deployment time and they should not be changed afterwards. DataHub expects these secrets to be secure, so ensure you have a secret with sufficient entropy. Future updates will make QoL changes here to make this easier to manage.
@@ -169,6 +172,8 @@ juju integrate datahub-k8s os-client
 **Note:** It is highly recommended to wait between commands to let `juju status` show an `active-idle` status for the charm.
 
 After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on `localhost:9002` with `datahub` for both username and password. Refer to [below](#accessing-datahub-from-the-host-machine) on how to connect to a `datahub` deployment inside a `multipass` VM.
+
+**Note:** If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not load. This is best identified by the requests to `/graphql` returning a `500`.
 
 ## Iterating on the charm
 
