@@ -4,12 +4,14 @@
 """Helpers for integration tests."""
 
 import logging
+import uuid
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Literal, Tuple
 
 import yaml
-from juju.model import Model
 from pytest_operator.plugin import OpsTest
+
+import exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,10 @@ ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
 
 
+# Used to make models unique between parallel runs.
+__RUN_ID = uuid.uuid4().hex
+
+
 async def add_juju_secrets(ops_test: OpsTest) -> Dict[str, Tuple[str, str]]:
     """Add required Juju user secrets to model.
 
@@ -66,25 +72,6 @@ async def add_juju_secrets(ops_test: OpsTest) -> Dict[str, Tuple[str, str]]:
         "encryption-keys-secret": (keys_id, keys_name),
     }
     return ret
-
-
-async def build_offer_url(ops_test: OpsTest, model: Model, offer_name: str) -> str:
-    """Build offer URL from inputs.
-
-    Args:
-        ops_test: PyTest object that holds the model.
-        model: Juju model to get offer information.
-        offer_name: Name of the offer.
-
-    Returns:
-        URL for the offer.
-    """
-    controller = await model.get_controller()
-    username = controller.get_current_username()
-    controller_name = ops_test.controller_name
-    model_name = model.name
-    offer_url = f"{controller_name}:{username}/{model_name}.{offer_name}"
-    return offer_url
 
 
 async def deploy_charm(ops_test: OpsTest, charm: Path) -> None:
@@ -117,3 +104,60 @@ async def get_unit_url(ops_test: OpsTest, application: str, unit: str, port: int
     status = await ops_test.model.get_status()
     address = status["applications"][application]["units"][f"{application}/{unit}"]["address"]
     return f"{protocol}://{address}:{port}"
+
+
+async def ensure_model(label: str, ops_test: OpsTest, cloud_name: str, cloud_type: Literal["k8s", "lxd"]) -> str:
+    """Get (or create) the model on the given cloud and return its name.
+
+    Args:
+        label: Unique label to ensure a distinct model across tests.
+        ops_test: PyTest object.
+        cloud_name: Name of the cloud from the Juju controller.
+        cloud_type: Type of the cloud between k8s and lxd.
+
+    Returns:
+        Name of the model being ensured.
+
+    Raises:
+        SetupFailedError: If model creation or configuration fails.
+    """
+    # Ref: https://github.com/canonical/livepatch-k8s-operator/blob/b48995d02f549dca0be46dd15790b5985669d7fe/tests/integration/helpers.py#L32  # noqa: W505
+    model_name = f"datahub-test-{label}-{cloud_name}-{__RUN_ID}"
+    # Juju limits model names to 63 characters. This does not guarantee name uniqueness!
+    model_name = model_name[:63]
+    if any((v.model_name == model_name for v in ops_test.models.values())):
+        return model_name
+
+    # Explicitly create the model to avoid auth errors.
+    code, stdout, stderr = await ops_test.juju("add-model", model_name, cloud_name)
+    if code != 0:
+        logger.error("'juju add-model' failed:\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
+        raise exceptions.SetupFailedError("command 'juju add-model' failed")
+
+    model = await ops_test.track_model(
+        alias=model_name,
+        model_name=model_name,
+        cloud_name=cloud_name,
+        use_existing=True,
+        keep=False,
+    )
+
+    # No need for further processing.
+    if cloud_type != "k8s":
+        return model.name
+
+    # There is a bug that prevents deploying charms for k8s cloud on lxd controller.
+    # Prevent by updating the workload storage parameter.
+    # See:
+    # - https://bugs.launchpad.net/juju/+bug/2031216
+    # - https://bugs.launchpad.net/juju/+bug/2077426
+    controller_cloud = await (await model.get_controller()).cloud()
+    if controller_cloud.cloud.type_ == "lxd":
+        code, stdout, stderr = await ops_test.juju(
+            "model-config", "-m", model.name, "workload-storage=microk8s-hostpath"
+        )
+        if code != 0:
+            logger.error("'juju model-config' failed:\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
+            raise exceptions.SetupFailedError("command 'juju model-config' failed")
+
+    return model.name

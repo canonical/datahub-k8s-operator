@@ -22,3 +22,7 @@ class BadLogicError(Exception):
     This is to be used in place of `assert False` as
     our linters are not fond of asserts outside of tests.
     """
+
+
+class SetupFailedError(Exception):
+    """Raised during tests when test setup fails."""

@@ -280,17 +280,23 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Run initialization jobs.
         try:
             for service in SERVICES:
+                container = self.unit.get_container(service.name)
+                if not container.can_connect():
+                    logger.info("Cannot connect to service '%s', deferring initialization", service.name)
+                    event.defer()
+                    return
                 service.run_initialization(context)
         except Exception as e:
             # TODO (mertalpt): This is likely to result in an error loop,
             # can we solve it another way?
-            logger.debug("Failed to initialize service '%s' due to error: '%s'", service.name, str(e))
+            logger.error("Failed to initialize service '%s' due to error: '%s'", service.name, str(e))
             raise
 
         # Update services.
         for service in SERVICES:
             container = self.unit.get_container(service.name)
             if not container.can_connect():
+                logger.info("Cannot connect to service '%s', deferring replan", service.name)
                 event.defer()
                 return
 
