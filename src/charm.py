@@ -60,7 +60,9 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
     }
     layer = {
         "summary": f"DataHub layer for '{service.name}'",
-        "services": svc_dict,
+        "services": {
+            service.name: svc_dict,
+        },
     }
 
     env = service.compile_environment(context)
