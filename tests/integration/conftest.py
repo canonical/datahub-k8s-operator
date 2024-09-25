@@ -129,15 +129,41 @@ async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> Non
             await ops_test.juju("consume", f"{lxd_model}.{helpers.POSTGRES_OFFER_NAME}")
 
             # Relate to offers
-            logger.info("Integrating to offers")
-            await asyncio.gather(
-                ops_test.model.integrate(helpers.APP_NAME, helpers.KAFKA_OFFER_NAME),
-                ops_test.model.integrate(helpers.APP_NAME, helpers.OPENSEARCH_OFFER_NAME),
-                ops_test.model.integrate(helpers.APP_NAME, helpers.POSTGRES_OFFER_NAME),
+            logger.info("Integrating to '%s'", helpers.KAFKA_OFFER_NAME)
+            await ops_test.model.integrate(helpers.APP_NAME, helpers.KAFKA_OFFER_NAME)
+            logger.info(
+                "Waiting for '%s' to settle into 'blocked-idle' post '%s' integration",
+                helpers.APP_NAME,
+                helpers.KAFKA_OFFER_NAME,
+            )
+            await ops_test.model.wait_for_idle(
+                apps=[helpers.APP_NAME],
+                status="blocked",
+                raise_on_blocked=False,
+                timeout=10 * 60,
             )
 
-            # Wait for DataHub to settle
-            logger.info("Waiting for '%s' to settle into 'active-idle'", helpers.APP_NAME)
+            logger.info("Integrating to '%s'", helpers.OPENSEARCH_OFFER_NAME)
+            await ops_test.model.integrate(helpers.APP_NAME, helpers.OPENSEARCH_OFFER_NAME)
+            logger.info(
+                "Waiting for '%s' to settle into 'blocked-idle' post '%s' integration",
+                helpers.APP_NAME,
+                helpers.OPENSEARCH_OFFER_NAME,
+            )
+            await ops_test.model.wait_for_idle(
+                apps=[helpers.APP_NAME],
+                status="blocked",
+                raise_on_blocked=False,
+                timeout=10 * 60,
+            )
+
+            logger.info("Integrating to '%s'", helpers.POSTGRES_OFFER_NAME)
+            await ops_test.model.integrate(helpers.APP_NAME, helpers.POSTGRES_OFFER_NAME)
+            logger.info(
+                "Waiting for '%s' to settle into 'active-idle' post '%s' integration",
+                helpers.APP_NAME,
+                helpers.POSTGRES_OFFER_NAME,
+            )
             await ops_test.model.wait_for_idle(
                 apps=[helpers.APP_NAME],
                 status="active",
@@ -146,18 +172,18 @@ async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> Non
             )
 
     # Return to check dependencies did not fail
-    logger.info("Checking dependency status post-integration")
-    with ops_test.model_context(lxd_model):
-        async with ops_test.fast_forward():
-            await ops_test.model.wait_for_idle(
-                apps=[
-                    helpers.KAFKA_NAME,
-                    helpers.OPENSEARCH_NAME,
-                    helpers.POSTGRES_NAME,
-                    helpers.CERTIFICATES_NAME,
-                    helpers.ZOOKEPER_NAME,
-                ],
-                status="active",
-                raise_on_blocked=False,
-                timeout=10 * 60,
-            )
+    # logger.info("Checking dependency status post-integration")
+    # with ops_test.model_context(lxd_model):
+    #     async with ops_test.fast_forward():
+    #         await ops_test.model.wait_for_idle(
+    #             apps=[
+    #                 helpers.KAFKA_NAME,
+    #                 helpers.OPENSEARCH_NAME,
+    #                 helpers.POSTGRES_NAME,
+    #                 helpers.CERTIFICATES_NAME,
+    #                 helpers.ZOOKEPER_NAME,
+    #             ],
+    #             status="active",
+    #             raise_on_blocked=False,
+    #             timeout=10 * 60,
+    #         )

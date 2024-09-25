@@ -89,6 +89,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
             }
         )
 
+    logger.info("Return plan for '%s': '%s'", service.name, str(layer))
     return layer
 
 
@@ -196,21 +197,32 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         try:
             self._check_state()
-        except exceptions.UnreadyStateError as err:
+        except (exceptions.UnreadyStateError, exceptions.ImproperSecretError) as err:
             self.unit.status = ops.BlockedStatus(str(err))
             return
 
+        all_plans_valid = True
         for service in SERVICES:
             if service.healthcheck is None:
                 continue
 
             container = self.unit.get_container(service.name)
             logger.info("performing up check for '%s'", service.name)
-            check = container.get_check("up")
+            plan = container.get_plan().to_dict()
+            logger.info("plan is '%s'", str(plan))
+            try:
+                check = container.get_check("up")
+            except ops.model.ModelError:
+                logger.info("invalid plan for '%s', attempting replanning", service.name)
+                all_plans_valid = False
+                break
             if check.status != CheckStatus.UP:
                 logger.error("up check failed for '%s'", service.name)
                 self.unit.status = ops.MaintenanceStatus("status check: DOWN")
                 return
+
+        if not all_plans_valid:
+            self._update(event)
 
         self.unit.status = ops.ActiveStatus()
 
