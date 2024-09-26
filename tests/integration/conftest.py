@@ -6,7 +6,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Union
+from typing import Tuple, Union
 
 import helpers
 import pytest_asyncio
@@ -29,7 +29,7 @@ async def charm(request: FixtureRequest, ops_test: OpsTest) -> Union[str, Path]:
 
 
 @pytest_asyncio.fixture(scope="module")
-async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> None:
+async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> Tuple[str, str]:
     """Build, deploy, and relate everything together."""
     label = (request.module.__name__).replace("_", "-")
     k8s_model = await helpers.ensure_model(label, ops_test, "microk8s", "k8s")
@@ -170,6 +170,8 @@ async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> Non
                 raise_on_blocked=False,
                 timeout=15 * 60,
             )
+
+    return (k8s_model, lxd_model)
 
     # Return to check dependencies did not fail
     # logger.info("Checking dependency status post-integration")
