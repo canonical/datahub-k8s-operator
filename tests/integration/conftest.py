@@ -110,13 +110,13 @@ async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> Tup
     with ops_test.model_context(k8s_model):
         async with ops_test.fast_forward():
             # Deploy DataHub
-            logger.info("Deploying '%s'", helpers.APP_NAME)
-            await helpers.deploy_charm(ops_test, charm)
+            logger.info("Deploying '%s'", helpers.helpers.APP_NAME)
+            await helpers.helpers.deploy_charm(ops_test, charm)
 
             # Wait for DataHub to settle
-            logger.info("Waiting for '%s' to settle into 'active-idle'", helpers.APP_NAME)
+            logger.info("Waiting for '%s' to settle into 'active-idle'", helpers.helpers.APP_NAME)
             await ops_test.model.wait_for_idle(
-                apps=[helpers.APP_NAME],
+                apps=[helpers.helpers.APP_NAME],
                 status="blocked",
                 raise_on_blocked=False,
                 timeout=10 * 60,
@@ -130,42 +130,42 @@ async def deploy(request: FixtureRequest, ops_test: OpsTest, charm: Path) -> Tup
 
             # Relate to offers
             logger.info("Integrating to '%s'", helpers.KAFKA_OFFER_NAME)
-            await ops_test.model.integrate(helpers.APP_NAME, helpers.KAFKA_OFFER_NAME)
+            await ops_test.model.integrate(helpers.helpers.APP_NAME, helpers.KAFKA_OFFER_NAME)
             logger.info(
                 "Waiting for '%s' to settle into 'blocked-idle' post '%s' integration",
-                helpers.APP_NAME,
+                helpers.helpers.APP_NAME,
                 helpers.KAFKA_OFFER_NAME,
             )
             await ops_test.model.wait_for_idle(
-                apps=[helpers.APP_NAME],
+                apps=[helpers.helpers.APP_NAME],
                 status="blocked",
                 raise_on_blocked=False,
                 timeout=10 * 60,
             )
 
             logger.info("Integrating to '%s'", helpers.OPENSEARCH_OFFER_NAME)
-            await ops_test.model.integrate(helpers.APP_NAME, helpers.OPENSEARCH_OFFER_NAME)
+            await ops_test.model.integrate(helpers.helpers.APP_NAME, helpers.OPENSEARCH_OFFER_NAME)
             logger.info(
                 "Waiting for '%s' to settle into 'blocked-idle' post '%s' integration",
-                helpers.APP_NAME,
+                helpers.helpers.APP_NAME,
                 helpers.OPENSEARCH_OFFER_NAME,
             )
             await ops_test.model.wait_for_idle(
-                apps=[helpers.APP_NAME],
+                apps=[helpers.helpers.APP_NAME],
                 status="blocked",
                 raise_on_blocked=False,
                 timeout=10 * 60,
             )
 
             logger.info("Integrating to '%s'", helpers.POSTGRES_OFFER_NAME)
-            await ops_test.model.integrate(helpers.APP_NAME, helpers.POSTGRES_OFFER_NAME)
+            await ops_test.model.integrate(helpers.helpers.APP_NAME, helpers.POSTGRES_OFFER_NAME)
             logger.info(
                 "Waiting for '%s' to settle into 'active-idle' post '%s' integration",
-                helpers.APP_NAME,
+                helpers.helpers.APP_NAME,
                 helpers.POSTGRES_OFFER_NAME,
             )
             await ops_test.model.wait_for_idle(
-                apps=[helpers.APP_NAME],
+                apps=[helpers.helpers.APP_NAME],
                 status="active",
                 raise_on_blocked=False,
                 timeout=15 * 60,
