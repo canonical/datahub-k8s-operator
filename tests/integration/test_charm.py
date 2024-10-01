@@ -171,6 +171,7 @@ class TestDeployment:
                     helpers.APP_NAME,
                     helpers.POSTGRES_OFFER_NAME,
                 )
+                await asyncio.sleep(10 * 60)
                 await ops_test.model.wait_for_idle(
                     apps=[helpers.APP_NAME],
                     status="active",
