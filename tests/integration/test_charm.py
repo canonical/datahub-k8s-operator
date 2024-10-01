@@ -38,7 +38,7 @@ class TestDeployment:
     async def test_deploy_full(self, ops_test: OpsTest, charm: Path):
         """Build the charm-under-test and deploy it with the entire ecosystem."""
         # Setup
-        label = "full_deploy"
+        label = "full-deploy"
         k8s_model = await helpers.ensure_model(label, ops_test, "microk8s", "k8s")
         lxd_model = await helpers.ensure_model(label, ops_test, "localhost", "lxd")
 
@@ -178,13 +178,18 @@ class TestDeployment:
                     timeout=15 * 60,
                 )
 
+        lxd_status = await ops_test.model.get_status()
+        logger.info("LXD status: %s", str(lxd_status))
+
         # Test        
-        logger.info("building unit url")
         with ops_test.model_context(k8s_model):
+            k8s_status = await ops_test.model.get_status()
+            logger.info("K8s status: %s", str(k8s_status))
+            logger.info("building unit url")
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
             url = f"{base_url}/admin"
 
-        logger.info("making request to: '%s'", url)
-        response = requests.get(url, timeout=300)
-        logger.info("response: %s", response.json())
-        assert response.status_code == 200
+            logger.info("making request to: '%s'", url)
+            response = requests.get(url, timeout=300)
+            logger.info("response: %s", response.json())
+            assert response.status_code == 200

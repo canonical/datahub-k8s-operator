@@ -207,6 +207,10 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 continue
 
             container = self.unit.get_container(service.name)
+            if not container.can_connect():
+                logger.info("Cannot connect to service '%s', attempting replanning", service.name)
+                all_plans_valid = False
+                break
             logger.info("performing up check for '%s'", service.name)
             plan = container.get_plan().to_dict()
             logger.info("plan is '%s'", str(plan))
