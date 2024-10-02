@@ -115,7 +115,7 @@ class TestDeployment:
             )
 
         with ops_test.model_context(k8s_model):
-            async with ops_test.fast_forward():
+            async with ops_test.fast_forward(fast_interval="1m"):
                 # Deploy DataHub
                 logger.info("Deploying '%s'", helpers.APP_NAME)
                 await helpers.deploy_charm(ops_test, charm)
