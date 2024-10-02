@@ -200,33 +200,54 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self.unit.status = ops.BlockedStatus(str(err))
             return
 
-        all_plans_valid = True
+        err_check = []
+        err_connect = []
+        err_plan = []
         for service in SERVICES:
             if service.healthcheck is None:
                 continue
 
             container = self.unit.get_container(service.name)
             if not container.can_connect():
-                logger.info("Cannot connect to service '%s', attempting replanning", service.name)
-                all_plans_valid = False
-                break
+                logger.info("cannot connect to service '%s'")
+                err_connect.append(service.name)
+                continue
             logger.info("performing up check for '%s'", service.name)
             try:
                 check = container.get_check("up")
             except ops.model.ModelError:
-                logger.info("invalid plan for '%s', attempting replanning", service.name)
-                all_plans_valid = False
-                break
+                logger.info("invalid plan for '%s'", service.name)
+                err_plan.append(service.name)
+                continue
             if check.status != CheckStatus.UP:
-                logger.error("up check failed for '%s'", service.name)
-                self.unit.status = ops.MaintenanceStatus("status check: DOWN")
-                return
+                logger.info("up check failed for '%s'", service.name)
+                err_check.append(service.name)
+                continue
             logger.info("service '%s' is up", service.name)
 
-        if not all_plans_valid:
-            self._update(event)
+        if err_check or err_connect or err_plan:
+            message = "status check failed"
+            if err_connect:
+                detail = f", cannot connect: ({', '.join(err_connect)})"
+                message += detail
+            if err_plan:
+                detail = f", invalid plan: ({', '.join(err_plan)})"
+                message += detail
+            if err_check:
+                detail = f", failed check: ({', '.join(err_check)})"
+                message += detail
+            logger.info(message)
 
-        self.unit.status = ops.ActiveStatus()
+        if err_connect:
+            logger.info("deferring until connection is available")
+            event.defer()
+        elif err_plan:
+            logger.info("attempting replanning")
+            self._update(event)
+        elif err_check:
+            self.unit.status = ops.MaintenanceStatus("status check: DOWN")
+        else:
+            self.unit.status = ops.ActiveStatus()
 
     def _check_state(self):
         """Check the current state of the relations and overall charm readiness.
