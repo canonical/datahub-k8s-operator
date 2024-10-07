@@ -200,11 +200,18 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self.unit.status = ops.BlockedStatus(str(err))
             return
 
+        context = services.ServiceContext(self)
         err_check = []
         err_connect = []
         err_plan = []
+        err_unready = []
         for service in SERVICES:
             if service.healthcheck is None:
+                continue
+
+            if not service.is_enabled(context):
+                logger.info("service '%s' is not ready", service.name)
+                err_unready.append(service.name)
                 continue
 
             container = self.unit.get_container(service.name)
@@ -246,6 +253,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self._update(event)
         elif err_check:
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
+        elif err_unready:
+            self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         else:
             self.unit.status = ops.ActiveStatus()
 
