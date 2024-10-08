@@ -114,6 +114,9 @@ class TestDeployment:
                 ),
             )
 
+        lxd_status = await ops_test.model.get_status()
+        logger.info("LXD status: %s", str(lxd_status))
+
         with ops_test.model_context(k8s_model):
             async with ops_test.fast_forward(fast_interval="5m"):
                 # Deploy DataHub
@@ -171,26 +174,22 @@ class TestDeployment:
                     helpers.APP_NAME,
                     helpers.POSTGRES_OFFER_NAME,
                 )
-                await asyncio.sleep(10 * 60)
+                k8s_status = await ops_test.model.get_status()
+                logger.info("K8s status: %s", str(k8s_status))
                 await ops_test.model.wait_for_idle(
                     apps=[helpers.APP_NAME],
                     status="active",
                     raise_on_blocked=False,
-                    timeout=15 * 60,
+                    timeout=10 * 60,
                 )
-
-        lxd_status = await ops_test.model.get_status()
-        logger.info("LXD status: %s", str(lxd_status))
 
         # Test        
         with ops_test.model_context(k8s_model):
-            k8s_status = await ops_test.model.get_status()
-            logger.info("K8s status: %s", str(k8s_status))
             logger.info("building unit url")
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
             url = f"{base_url}/admin"
 
             logger.info("making request to: '%s'", url)
-            response = requests.get(url, timeout=300)
+            response = requests.get(url, timeout=180)
             logger.info("response: %s", response.json())
             assert response.status_code == 200

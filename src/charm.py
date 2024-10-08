@@ -7,6 +7,8 @@
 import logging
 from typing import Dict, List, Type, Union
 
+import requests
+
 import ops
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
@@ -229,6 +231,10 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s'", service.name)
                 err_check.append(service.name)
+                plan = get_pebble_layer(service, context)
+                url = plan["checks"]["up"]["http"]["url"]
+                response = requests.get(url)
+                logging.info("check response - code: '%d' | text: '%s'", response.status_code, response.text)
                 continue
             logger.info("service '%s' is up", service.name)
 
