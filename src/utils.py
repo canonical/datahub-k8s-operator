@@ -8,8 +8,9 @@ import os
 import random
 import secrets
 import string
-from ops import pebble
 from typing import Any, Dict, List, Optional, Tuple
+
+from ops import pebble
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def push_contents_to_file(container: Any, contents: pebble._IOSource, dest_path:
 
     if not is_valid_type:
         raise ValueError(f"invalid content type: '{type(contents)}'")
-    
+
     container.push(dest_path, contents, make_dirs=True, permissions=permissions)
 
 

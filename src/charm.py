@@ -7,9 +7,8 @@
 import logging
 from typing import Dict, List, Type, Union
 
-import requests
-
 import ops
+import requests
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
     KafkaRequires,
@@ -196,6 +195,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The `update-status` event that is triggered at regular intervals.
         """
+        # TODO (mertalpt): Cleanup before merging.
         try:
             self._check_state()
         except (exceptions.UnreadyStateError, exceptions.ImproperSecretError) as err:
@@ -233,7 +233,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 err_check.append(service.name)
                 plan = get_pebble_layer(service, context)
                 url = plan["checks"]["up"]["http"]["url"]
-                response = requests.get(url)
+                response = requests.get(url, timeout=30)
                 logging.info("check response - code: '%d' | text: '%s'", response.status_code, response.text)
                 continue
             logger.info("service '%s' is up", service.name)

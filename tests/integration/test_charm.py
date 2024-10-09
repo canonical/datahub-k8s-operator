@@ -4,10 +4,10 @@
 
 """Run integration tests."""
 
+import asyncio
 import logging
 from pathlib import Path
 
-import asyncio
 import helpers
 import pytest
 import requests
@@ -32,9 +32,11 @@ class TestDeployment:
         await ops_test.model.wait_for_idle(apps=[helpers.APP_NAME], status="blocked", timeout=1000)
 
         # Cleanup
-        await ops_test.model.remove_application(helpers.APP_NAME, block_until_done=True, force=True, destroy_storage=True)
+        await ops_test.model.remove_application(
+            helpers.APP_NAME, block_until_done=True, force=True, destroy_storage=True
+        )
 
-    #@pytest.mark.usefixtures("deploy")
+    # @pytest.mark.usefixtures("deploy")
     async def test_deploy_full(self, ops_test: OpsTest, charm: Path):
         """Build the charm-under-test and deploy it with the entire ecosystem."""
         # Setup
@@ -124,7 +126,7 @@ class TestDeployment:
                 await helpers.deploy_charm(ops_test, charm)
 
                 # TODO (mertalpt): Logs indicate that 'pebble_ready' is not even done by the time
-                # the following check clears, artifically introduce a delay to let it settle.
+                # the following check clears, artificially introduce a delay to let it settle.
                 # If it works, integrate it into the source and make it nicer.
                 # PS. I think the reason it is not a problem locally is that we never have to
                 # go into a defer loop due to not making a connection to the containers in there.
@@ -190,7 +192,7 @@ class TestDeployment:
                     timeout=10 * 60,
                 )
 
-        # Test        
+        # Test
         with ops_test.model_context(k8s_model):
             logger.info("building unit url")
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
