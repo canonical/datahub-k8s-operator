@@ -69,6 +69,7 @@ class OpenSearchRelation(framework.Object):
             conn["initialized"] = False
 
         self.charm._state.opensearch_connection = conn
+        logger.info("opensearch credentials: '%s'", str(conn))
         self.charm._update(event)
 
     @log_event_handler(logger)
