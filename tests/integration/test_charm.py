@@ -123,8 +123,15 @@ class TestDeployment:
                 logger.info("Deploying '%s'", helpers.APP_NAME)
                 await helpers.deploy_charm(ops_test, charm)
 
+                # TODO (mertalpt): Logs indicate that 'pebble_ready' is not even done by the time
+                # the following check clears, artifically introduce a delay to let it settle.
+                # If it works, integrate it into the source and make it nicer.
+                # PS. I think the reason it is not a problem locally is that we never have to
+                # go into a defer loop due to not making a connection to the containers in there.
+                await asyncio.sleep(10 * 60)
+
                 # Wait for DataHub to settle
-                logger.info("Waiting for '%s' to settle into 'active-idle'", helpers.APP_NAME)
+                logger.info("Waiting for '%s' to settle into 'blocked-idle'", helpers.APP_NAME)
                 await ops_test.model.wait_for_idle(
                     apps=[helpers.APP_NAME],
                     status="blocked",
