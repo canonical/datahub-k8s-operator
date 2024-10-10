@@ -63,6 +63,12 @@ class OpenSearchRelation(framework.Object):
         conn["password"] = event.password
         conn["tls-ca"] = event.tls_ca
 
+        # Opensearch can fail to create the index, handle by deferring.
+        if any((v is None for v in conn.values())):
+            logger.info("missing credentials from the opensearch relation, deferring")
+            event.defer()
+            return
+
         # TODO (mertalpt): Check if it is possible to attach to an uninitialized
         # Opensearch deployment without breaking the existing relation first.
         if conn.get("initialized") is None:
