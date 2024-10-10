@@ -106,7 +106,9 @@ async def get_unit_url(ops_test: OpsTest, application: str, unit: str, port: int
     return f"{protocol}://{address}:{port}"
 
 
-async def ensure_model(label: str, ops_test: OpsTest, cloud_name: str, cloud_type: Literal["k8s", "lxd"]) -> str:
+async def ensure_model(
+    label: str, ops_test: OpsTest, cloud_name: str, cloud_type: Literal["k8s", "lxd"], enable_debug_logs: bool = True
+) -> str:
     """Get (or create) the model on the given cloud and return its name.
 
     Args:
@@ -114,6 +116,7 @@ async def ensure_model(label: str, ops_test: OpsTest, cloud_name: str, cloud_typ
         ops_test: PyTest object.
         cloud_name: Name of the cloud from the Juju controller.
         cloud_type: Type of the cloud between k8s and lxd.
+        enable_debug_logs: Whether to have debug logs enabled in the model.
 
     Returns:
         Name of the model being ensured.
@@ -159,5 +162,12 @@ async def ensure_model(label: str, ops_test: OpsTest, cloud_name: str, cloud_typ
         if code != 0:
             logger.error("'juju model-config' failed:\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
             raise exceptions.SetupFailedError("command 'juju model-config' failed")
+
+    if enable_debug_logs:
+        code, stdout, stderr = await ops_test.juju(
+            "model-config", "-m", model.name, 'logging-config="<root>=INFO;unit=DEBUG"'
+        )
+        if code != 0:
+            logger.warning("could not enable debug logs, proceeding\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
 
     return model.name
