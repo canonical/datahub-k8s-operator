@@ -10,6 +10,8 @@ import secrets
 import string
 from typing import Any, Dict, List, Optional, Tuple
 
+from ops import pebble
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ def get_abs_path(*relative_path: str) -> str:
     return os.path.join(charm_dir, *relative_path)
 
 
-def push_contents_to_file(container: Any, contents: str, dest_path: str, permissions: int) -> None:
+def push_contents_to_file(container: Any, contents: pebble._IOSource, dest_path: str, permissions: int) -> None:
     """Push a string to the path in the given container as a file.
 
     Args:
@@ -36,7 +38,23 @@ def push_contents_to_file(container: Any, contents: str, dest_path: str, permiss
         contents: String that will form the contents of the pushed file.
         dest_path: Absolute path to place the file in, including the file name.
         permissions: Permissions to use for the file.
+
+    Raises:
+        ValueError: If type of 'contents' is invalid.
     """
+    # `push` uses a custom type, the following type checks for that type as defined now.
+    # This is prone to breaking if the type definition changes but it should be easy to
+    # catch and fix it quickly.
+    is_valid_type = False
+    if isinstance(contents, (str, bytes)):
+        is_valid_type = True
+    # Type check for the protocol component.
+    elif hasattr(contents, "read") and hasattr(contents, "write") and hasattr(contents, "__enter__"):
+        is_valid_type = True
+
+    if not is_valid_type:
+        raise ValueError(f"invalid content type: '{type(contents)}'")
+
     container.push(dest_path, contents, make_dirs=True, permissions=permissions)
 
 
