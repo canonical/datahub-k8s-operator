@@ -155,6 +155,7 @@ class TestDeployment:
                     helpers.APP_NAME,
                     helpers.KAFKA_OFFER_NAME,
                 )
+                await asyncio.sleep(2 * 60)
                 await ops_test.model.wait_for_idle(
                     apps=[helpers.APP_NAME],
                     status="blocked",
@@ -169,6 +170,7 @@ class TestDeployment:
                     helpers.APP_NAME,
                     helpers.OPENSEARCH_OFFER_NAME,
                 )
+                await asyncio.sleep(2 * 60)
                 await ops_test.model.wait_for_idle(
                     apps=[helpers.APP_NAME],
                     status="blocked",
@@ -185,12 +187,15 @@ class TestDeployment:
                 )
                 k8s_status = await ops_test.model.get_status()
                 logger.info("K8s status: %s", str(k8s_status))
+                await asyncio.sleep(2 * 60)
                 await ops_test.model.wait_for_idle(
                     apps=[helpers.APP_NAME],
                     status="active",
                     raise_on_blocked=False,
                     timeout=10 * 60,
                 )
+
+                await asyncio.sleep(5 * 60)
 
         # Test
         with ops_test.model_context(k8s_model):
