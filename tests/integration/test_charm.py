@@ -36,7 +36,6 @@ class TestDeployment:
             helpers.APP_NAME, block_until_done=True, force=True, destroy_storage=True
         )
 
-    @pytest.mark.skip(reason="Bugs with Opensearch and self-hosted runners prevent this from running properly.")
     @pytest.mark.usefixtures("charm")
     async def test_deploy_full(self, ops_test: OpsTest, charm: Path):
         """Build the charm-under-test and deploy it with the entire ecosystem."""
