@@ -158,7 +158,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             service_hostname=self.external_hostname,
             service_name=self.app.name,
             service_port=literals.FRONTEND_PORT,
-            tls_secret_name=self.config.get("tls-secret-name", ""),
+            tls_secret_name=self.config["tls-secret-name"] or "",
             backend_protocol="HTTP",
         )
 

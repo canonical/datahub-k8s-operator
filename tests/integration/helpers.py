@@ -41,6 +41,8 @@ CERTIFICATES_NAME = "self-signed-certificates"
 CERTIFICATES_CHANNEL = "latest/stable"
 ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
+INGRESS_NAME = "nginx-ingress-integrator"
+INGRESS_CHANNEL = "stable"
 
 
 # Used to make models unique between parallel runs.
@@ -86,6 +88,22 @@ async def deploy_charm(ops_test: OpsTest, charm: Path) -> None:
 
     await ops_test.model.deploy(charm, resources=RESOURCES, config=config, application_name=APP_NAME)
     await ops_test.model.grant_secret(secrets["encryption-keys-secret"][1], APP_NAME)
+
+    # Setup the ingress.
+    await ops_test.model.deploy(INGRESS_NAME, channel=INGRESS_CHANNEL, trust=True)
+    await ops_test.model.wait_for_idle(
+        apps=[INGRESS_NAME],
+        status="waiting",
+        raise_on_blocked=False,
+        timeout=200,
+    )
+    await ops_test.model.integrate(APP_NAME, INGRESS_NAME)
+    await ops_test.model.wait_for_idle(
+        apps=[INGRESS_NAME],
+        status="active",
+        raise_on_blocked=False,
+        timeout=300,
+    )
 
 
 async def get_unit_url(ops_test: OpsTest, application: str, unit: str, port: int, protocol: str = "http"):
