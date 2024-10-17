@@ -28,13 +28,11 @@ class TestDeployment:
         """
         # Deploy the charm and wait for blocked/idle status
         # We expect 'blocked' without dependencies
-        await helpers.deploy_charm(ops_test, charm),
-        await ops_test.model.wait_for_idle(apps=[helpers.APP_NAME], status="blocked", timeout=1000)
-
-        # Cleanup
-        await ops_test.model.remove_application(
-            helpers.APP_NAME, block_until_done=True, force=True, destroy_storage=True
-        )
+        label = "deploy-solo"
+        k8s_model = await helpers.ensure_model(label, ops_test, "microk8s", "k8s")
+        with ops_test.model_context(k8s_model):
+            await helpers.deploy_charm(ops_test, charm)
+            await ops_test.model.wait_for_idle(apps=[helpers.APP_NAME], status="blocked", timeout=1000)
 
     # TODO (mertalpt): Implement the following to avoid having to use an `xlarge` runner.
     # https://github.com/canonical/opensearch-operator/blob/2/edge/tests/integration/helpers.py#L149

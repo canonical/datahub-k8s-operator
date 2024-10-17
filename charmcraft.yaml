@@ -64,6 +64,8 @@ requires:
     interface: opensearch_client
     limit: 1
 
+  nginx-route:
+    interface: nginx-route
 
 # (Optional) Configuration options for the charm
 # This config section defines charm config options, and populates the Configure
@@ -86,6 +88,17 @@ config:
 
     opensearch-index-prefix:
       description: Prefix for the names of Opensearch indices created and used by DataHub.
+      type: string
+
+    external-hostname:
+      description: |
+        The DNS listing used for external connections.
+        Will default to the name of the deployed application.
+      type: string
+    
+    tls-secret-name:
+      description: |
+        Name of the k8s secret which contains the TLS certificate to be used by ingress.
       type: string
 
 

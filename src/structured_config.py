@@ -20,12 +20,16 @@ class CharmConfig(BaseConfigModel):
         oidc_secret_id: Juju secret ID to enable SSO.
         kafka_topic_prefix: Prefix to use for Kafka topic names.
         opensearch_index_prefix: Prefix to use for Opensearch indexes.
+        external_hostname: Hostname of unit visible to outside.
+        tls_secret_name: Name of the k8s secret to use for the TLS certificate.
     """
 
     encryption_keys_secret_id: str
     oidc_secret_id: Optional[str] = None
     kafka_topic_prefix: Optional[str] = None
     opensearch_index_prefix: Optional[str] = None
+    external_hostname: Optional[str] = None
+    tls_secret_name: Optional[str] = None
 
     @field_validator("*", mode="before")
     @classmethod

@@ -14,6 +14,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     OpenSearchRequires,
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
+from charms.nginx_ingress_integrator.v0.nginx_route import require_nginx_route
 from ops.pebble import CheckStatus
 
 import exceptions
@@ -98,6 +99,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     Attributes:
         _state: Used to store persistent data between invocations.
         config_type: Class used to store the config.
+        external_hostname: Property for the hostname of the unit visible to outside.
     """
 
     config_type = CharmConfig
@@ -137,9 +139,28 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         )
         self.opensearch_relation = OpenSearchRelation(self)
 
+        # Ingress
+        self._require_nginx_route()
+
         # Services
         for service in SERVICES:
             self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
+
+    @property
+    def external_hostname(self):
+        """Return the DNS listing used for external connections."""
+        return self.config["external-hostname"] or self.app.name
+
+    def _require_nginx_route(self):
+        """Require nginx-route relation based on the current configuration."""
+        require_nginx_route(
+            charm=self,
+            service_hostname=self.external_hostname,
+            service_name=self.app.name,
+            service_port=literals.FRONTEND_PORT,
+            tls_secret_name=self.config["tls-secret-name"] or "",
+            backend_protocol="HTTP",
+        )
 
     @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
