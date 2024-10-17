@@ -88,6 +88,17 @@ config:
       description: Prefix for the names of Opensearch indices created and used by DataHub.
       type: string
 
+    external-hostname:
+      description: |
+        The DNS listing used for external connections.
+        Will default to the name of the deployed application.
+      type: string
+    
+    tls-secret-name:
+      description: |
+        Name of the k8s secret which contains the TLS certificate to be used by ingress.
+      type: string
+
 
 # The containers and resources metadata apply to Kubernetes charms only.
 # See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
