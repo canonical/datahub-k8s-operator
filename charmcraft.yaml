@@ -1,0 +1,155 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+#
+# Learn more about testing at: https://juju.is/docs/sdk/testing
+
+# This file configures Charmcraft.
+# See https://juju.is/docs/sdk/charmcraft-config for guidance.
+
+name: datahub-k8s
+type: charm
+title: DataHub
+summary: DataHub operator
+description: |
+  DataHub is an extensible data catalog that enables data discovery, data observability
+  and federated data governance.
+
+  DataHub provides a service that can integrate with metadata sources such as PostgreSQL
+  and Kafka after which metadata such as tables, topics, schema and lineage is gathered
+  and served.
+
+  It is useful for keeping track of schema, ownership and dependency information in data
+  warehouses and pipelines.
+
+
+assumes:
+  - juju >= 3.3
+
+
+bases:
+  - build-on:
+    - name: ubuntu
+      channel: "22.04"
+      architectures:
+      - amd64
+    run-on:
+    - name: ubuntu
+      channel: "22.04"
+      architectures:
+      - amd64
+
+
+parts:
+  charm:
+    charm-binary-python-packages:
+      - pydantic-core
+    build-packages:
+      - rustc
+      - cargo
+
+peers:
+  peer:
+    interface: datahub
+    
+requires:
+  db:
+    interface: postgresql_client
+    limit: 1
+
+  kafka:
+    interface: kafka_client
+    limit: 1
+
+  opensearch:
+    interface: opensearch_client
+    limit: 1
+
+  nginx-route:
+    interface: nginx-route
+
+# (Optional) Configuration options for the charm
+# This config section defines charm config options, and populates the Configure
+# tab on Charmhub.
+# More information on this section at https://juju.is/docs/sdk/charmcraft-yaml#heading--config
+# General configuration documentation: https://juju.is/docs/sdk/config
+config:
+  options:
+    encryption-keys-secret-id:
+      description: Juju secret ID for the Frontand and GMS encryption keys.
+      type: string
+
+    oidc-secret-id:
+      description: Juju secret ID for the OIDC authentication secrets.
+      type: string
+
+    kafka-topic-prefix:
+      description: Prefix for the names of Kafka topics created and used by DataHub.
+      type: string
+
+    opensearch-index-prefix:
+      description: Prefix for the names of Opensearch indices created and used by DataHub.
+      type: string
+
+    external-hostname:
+      description: |
+        The DNS listing used for external connections.
+        Will default to the name of the deployed application.
+      type: string
+    
+    tls-secret-name:
+      description: |
+        Name of the k8s secret which contains the TLS certificate to be used by ingress.
+      type: string
+
+
+# The containers and resources metadata apply to Kubernetes charms only.
+# See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
+
+# Your workload’s containers.
+containers:
+  datahub-actions:
+    resource: datahub-actions
+  datahub-frontend:
+    resource: datahub-frontend
+  datahub-gms:
+    resource: datahub-gms
+  datahub-kafka-setup:
+    resource: datahub-kafka-setup
+  datahub-opensearch-setup:
+    resource: datahub-opensearch-setup
+  datahub-postgresql-setup:
+    resource: datahub-postgresql-setup
+  datahub-upgrade:
+    resource: datahub-upgrade
+
+
+# This field populates the Resources tab on Charmhub.
+resources:
+  datahub-actions:
+    type: oci-image
+    description: OCI image for DataHub Actions
+    upstream-source: acryldata/datahub-actions:v0.0.15
+  datahub-frontend:
+    type: oci-image
+    description: OCI image for DataHub Frontend
+    upstream-source: acryldata/datahub-frontend-react:v0.13.3
+  datahub-gms:
+    type: oci-image
+    description: OCI image for DataHub GMS
+    upstream-source: acryldata/datahub-gms:v0.13.3
+  datahub-kafka-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of Kafka
+    upstream-source: acryldata/datahub-kafka-setup:v0.13.3
+  datahub-opensearch-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of Opensearch
+    upstream-source: acryldata/datahub-elasticsearch-setup:v0.13.3
+  datahub-postgresql-setup:
+    type: oci-image
+    description: OCI image for initialization scripts of PostgreSQL
+    upstream-source: acryldata/datahub-postgres-setup:v0.13.3
+  datahub-upgrade:
+    type: oci-image
+    description: OCI image for initialization scripts of DataHub
+    upstream-source: acryldata/datahub-upgrade:v0.13.3

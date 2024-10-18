@@ -1,0 +1,6 @@
+ignore_files:
+- lib/charms/nginx_ingress_integrator/v0/nginx_route.py
+
+rules:
+  # Ignore "master" - branch names of repositories in references.
+  - name: master
