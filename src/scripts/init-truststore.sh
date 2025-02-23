@@ -6,8 +6,11 @@
 CERT_EXISTS=$(/usr/lib/jvm/java-17-openjdk/bin/keytool -list -cacerts -alias "$CERT_ALIAS" -storepass "changeit" 2>/dev/null)
 
 if [ -n "$CERT_EXISTS" ]; then
-  echo "Certificate with alias '$CERT_ALIAS' already exists. Deleting the existing certificate."
-  /usr/lib/jvm/java-17-openjdk/bin/keytool -delete -cacerts -alias "$CERT_ALIAS" -storepass "changeit"
+  # TODO (mertalpt): Room for improvement.
+  # This is used to import Opensearch CA certificates, which are from Let's Encrypt.
+  # It is very unlikely that those will change in content but not impossible.
+  echo "Certificate with alias '$CERT_ALIAS' already exists. Skipping initialization."
+  exit 0
 fi
 
 # Add the root CA certificate to the cacerts

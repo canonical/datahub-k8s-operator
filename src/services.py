@@ -244,7 +244,7 @@ class FrontendService(AbstractService):
             Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
-        checks = (context.charm._state.frontend_truststore_initialized is True,)
+        checks = (True,)
         return is_ready and all(checks)
 
     @classmethod
@@ -362,12 +362,6 @@ class FrontendService(AbstractService):
             logger.info("datahub-frontend is not ready to be initialized, skipping initialization")
             return False
 
-        # The only initialization step currently is to set up truststore for Opensearch SSL.
-        check_frontend_truststore = context.charm._state.frontend_truststore_initialized is True
-        if check_frontend_truststore:
-            logger.debug("datahub-frontend is already initialized, skipping initialization")
-            return False
-
         certificates = context.charm._state.opensearch_connection["tls-ca"]
         root_ca_cert = utils.split_certificates(certificates)[1]
 
@@ -394,7 +388,6 @@ class FrontendService(AbstractService):
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
 
         logger.info("Successful truststore initialization for datahub-frontend")
-        context.charm._state.frontend_truststore_initialized = True
         return True
 
 
@@ -425,7 +418,7 @@ class GMSService(AbstractService):
             Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
-        checks = (context.charm._state.gms_truststore_initialized is True,)
+        checks = (True,)
         return is_ready and all(checks)
 
     @classmethod
@@ -551,12 +544,6 @@ class GMSService(AbstractService):
             logger.info("datahub-gms is not ready to be initialized, skipping initialization")
             return False
 
-        # The only initialization step currently is to set up truststore for Opensearch SSL.
-        check_gms_truststore = context.charm._state.gms_truststore_initialized is True
-        if check_gms_truststore:
-            logger.debug("datahub-gms is already initialized, skipping initialization")
-            return False
-
         certificates = context.charm._state.opensearch_connection["tls-ca"]
         root_ca_cert = utils.split_certificates(certificates)[1]
 
@@ -583,7 +570,6 @@ class GMSService(AbstractService):
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-gms")
 
         logger.info("Successful truststore initialization for datahub-gms")
-        context.charm._state.gms_truststore_initialized = True
         return True
 
 
@@ -1088,12 +1074,6 @@ class UpgradeService(AbstractService):
             logger.info("Already ran datahub-upgrade, skipping initialization")
             return False
 
-        # We need to ensure that the truststore is configured first.
-        check_upgrade_truststore = context.charm._state.upgrade_truststore_initialized
-        if check_upgrade_truststore:
-            logger.debug("datahub-upgrade truststore is already initialized")
-            return False
-
         check_opensearch = utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
         if not check_opensearch:
             logger.info("Opensearch is not initialized yet, skipping running datahub-upgrade")
@@ -1158,5 +1138,4 @@ class UpgradeService(AbstractService):
             raise exceptions.InitializationFailedError("failed to run jobs for datahub-upgrade")
 
         logger.info("Successful datahub-upgrade run")
-        context.charm._state.ran_upgrade = True
         return True
