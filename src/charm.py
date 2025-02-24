@@ -162,6 +162,16 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             backend_protocol="HTTP",
         )
 
+        if self.config.get("external_gms_hostname"):
+            require_nginx_route(
+                charm=self,
+                service_hostname=self.config["external_gms_hostname"],
+                service_name=f"{self.app.name}-gms",
+                service_port=literals.GMS_PORT,
+                tls_secret_name="",  # nosec
+                backend_protocol="HTTP",
+            )
+
     @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
         """Handle pebble-ready event.

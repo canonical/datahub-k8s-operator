@@ -21,6 +21,7 @@ class CharmConfig(BaseConfigModel):
         kafka_topic_prefix: Prefix to use for Kafka topic names.
         opensearch_index_prefix: Prefix to use for Opensearch indexes.
         external_hostname: Hostname of unit visible to outside.
+        external_gms_hostname: Hostname of the GMS service visible to outside.
         tls_secret_name: Name of the k8s secret to use for the TLS certificate.
     """
 
@@ -29,6 +30,7 @@ class CharmConfig(BaseConfigModel):
     kafka_topic_prefix: Optional[str] = None
     opensearch_index_prefix: Optional[str] = None
     external_hostname: Optional[str] = None
+    external_gms_hostname: Optional[str] = None
     tls_secret_name: Optional[str] = None
 
     @field_validator("*", mode="before")

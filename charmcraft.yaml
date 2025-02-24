@@ -93,7 +93,12 @@ config:
     external-hostname:
       description: |
         The DNS listing used for external connections.
-        Will default to the name of the deployed application.
+      type: string
+
+    external-gms-hostname:
+      description: |
+        The DNS listing used for external connections to GMS service.
+        Will not be exposed if unset.
       type: string
     
     tls-secret-name:
