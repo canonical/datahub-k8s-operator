@@ -162,7 +162,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             backend_protocol="HTTP",
         )
 
-        if self.config.get("external_gms_hostname"):
+        if self.config["external_gms_hostname"]:
             require_nginx_route(
                 charm=self,
                 service_hostname=self.config["external_gms_hostname"],
