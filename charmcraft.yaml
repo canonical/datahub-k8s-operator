@@ -39,6 +39,15 @@ bases:
       - amd64
 
 
+charm-libs:
+  - lib: data_platform_libs.data_interfaces
+    version: "0"
+  - lib: data_platform_libs.data_models
+    version: "0"
+  - lib: nginx_ingress_integrator.nginx_route
+    version: "0"
+
+
 parts:
   charm:
     charm-binary-python-packages:

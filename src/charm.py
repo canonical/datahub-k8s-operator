@@ -179,6 +179,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             )
         # Frontend service requires a file to be present at startup.
         if event.workload.name == services.FrontendService.name:
+            self._state.frontend_truststore_initialized = False
             # TODO (mertalpt): Seek to make the default user configurable.
             utils.push_contents_to_file(
                 event.workload,
@@ -186,6 +187,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 "/etc/datahub/plugins/frontend/auth/user.props",
                 0o644,
             )
+        if event.workload.name == services.GMSService.name:
+            self._state.gms_truststore_initialized = False
 
         self._update(event)
 
