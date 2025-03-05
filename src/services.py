@@ -385,7 +385,7 @@ class FrontendService(AbstractService):
                 [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
                 environment={
                     "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "CERT_ALIAS": literals.OPENSEARCH_CERTIFICATES_PATH,
+                    "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
                 },
             )
             process.wait_output()
@@ -574,7 +574,7 @@ class GMSService(AbstractService):
                 [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
                 environment={
                     "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "CERT_ALIAS": literals.OPENSEARCH_CERTIFICATES_PATH,
+                    "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
                 },
             )
             process.wait_output()
@@ -1116,7 +1116,7 @@ class UpgradeService(AbstractService):
                 [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
                 environment={
                     "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "CERT_ALIAS": literals.OPENSEARCH_CERTIFICATES_PATH,
+                    "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
                 },
             )
             process.wait_output()
