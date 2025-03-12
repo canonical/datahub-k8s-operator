@@ -110,6 +110,14 @@ config:
         Name of the k8s secret which contains the TLS certificate to be used by ingress.
       type: string
 
+    use-play-cache-session-store:
+      description: |
+        Use Play framework's cache as session store instead of OIDC cookies.
+        Use this option when response headers are too large for reverse proxy buffers.
+        Note that this option turns the frontend service stateful and it is currently
+        unsupported for horizontally scaled deployments.
+      type: boolean
+      default: false
 
 # The containers and resources metadata apply to Kubernetes charms only.
 # See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.

@@ -20,8 +20,10 @@
 
 import abc
 import logging
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Optional
+from urllib.parse import urlparse
 
 import exceptions
 import literals
@@ -266,7 +268,7 @@ class FrontendService(AbstractService):
         return all(checks)
 
     @classmethod
-    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:
+    def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:  # noqa C901
         """Compile service specific environment variables from the context.
 
         Args:
@@ -315,12 +317,37 @@ class FrontendService(AbstractService):
             "ELASTIC_CLIENT_PASSWORD": os_conn["password"],
             "AUTH_SESSION_TTL_HOURS": "24",
         }
+        # Ref: https://datahubproject.io/docs/troubleshooting/quickstart/#ive-configured-oidc-but-i-cannot-login-i-get-continuously-redirected-what-do-i-do  # noqa
+        if context.charm.config.use_play_cache_session_store:
+            env["PAC4J_SESSIONSTORE_PROVIDER"] = "PlayCacheSessionStore"
         if context.charm.config.opensearch_index_prefix:
             env["ELASTIC_INDEX_PREFIX"] = context.charm.config.opensearch_index_prefix
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
 
-        # Setup OIDC if needed.
+        # Set up proxies if needed.
+        # Ref: https://datahubproject.io/docs/authentication/guides/sso/configure-oidc-behind-proxy/  # noqa
+        proxy_vars = {}
+        no_proxy_hosts = {"localhost"}
+        if env.get("DATAHUB_GMS_HOST"):
+            no_proxy_hosts.add(env["DATAHUB_GMS_HOST"])
+
+        if http_proxy_raw := os.getenv("JUJU_CHARM_HTTP_PROXY"):
+            http_proxy = urlparse(http_proxy_raw)
+            proxy_vars["HTTP_PROXY_HOST"] = http_proxy.hostname
+            proxy_vars["HTTP_PROXY_PORT"] = str(http_proxy.port or "")
+        if https_proxy_raw := os.getenv("JUJU_CHARM_HTTPS_PROXY"):
+            https_proxy = urlparse(https_proxy_raw)
+            proxy_vars["HTTPS_PROXY_HOST"] = https_proxy.hostname
+            proxy_vars["HTTPS_PROXY_PORT"] = str(https_proxy.port or "")
+        if no_proxy_raw := os.getenv("JUJU_CHARM_NO_PROXY"):
+            no_proxy = no_proxy_raw.split(",")
+            no_proxy_hosts = no_proxy_hosts.union(no_proxy)
+            proxy_vars["HTTP_NON_PROXY_HOSTS"] = "|".join(no_proxy_hosts)
+
+        env.update(proxy_vars)
+
+        # Set up OIDC if needed.
         if context.charm.config.oidc_secret_id is None:
             return env
 
@@ -332,10 +359,16 @@ class FrontendService(AbstractService):
         ):
             raise exceptions.ImproperSecretError("secret pointed to by 'oidc-secret-id' has improper contents")
 
+        oidc_base_url = "http://localhost:9002"
+        if context.charm.config.external_hostname:
+            # OIDC mandates the use of TLS, so the protocol is correct.
+            # TODO (mertalpt): Add a check when OIDC is enabled without TLS.
+            oidc_base_url = f"https://{context.charm.config.external_hostname}"
+
         oidc_env = {
             "AUTH_OIDC_ENABLED": "true",
             "AUTH_OIDC_DISCOVERY_URI": "https://accounts.google.com/.well-known/openid-configuration",
-            "AUTH_OIDC_BASE_URL": "http://localhost:9002",
+            "AUTH_OIDC_BASE_URL": oidc_base_url,
             "AUTH_OIDC_SCOPE": "openid profile email",
             "AUTH_OIDC_CLIENT_ID": content["client-id"],
             "AUTH_OIDC_CLIENT_SECRET": content["client-secret"],

@@ -114,6 +114,11 @@ client-secret: <client-secret-value>
 2.3. Deploy DataHub with the added config variable `--config oidc-secret-id=<secret-id>`.
 2.4. Run `juju grant-secret <secret-name> datahub-k8s` to set permissions.
 2.5. Proceed with the relations.
+3. If your deployment is behind a HTTP proxy, set it on your Juju model via
+```sh
+juju model-config juju-http-proxy=http://squid.internal:3128
+juju model-config juju-https-proxy=http://squid.internal:3128
+```
 
 ## Contributing
 This charm is still in active development. Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this charm following best practice guidelines, and [CONTRIBUTING.md](CONTRIBUTING.md) for developer guidance.

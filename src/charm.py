@@ -246,9 +246,16 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             try:
                 check = container.get_check("up")
             except ops.model.ModelError:
-                logger.info("invalid plan for '%s'", service.name)
+                logger.info("invalid plan (missing check) for '%s'", service.name)
                 is_invalid = True
-                continue
+                break  # guaranteed replan, exit loop
+            else:
+                plan = container.get_plan()
+                expected_plan = get_pebble_layer(service, context)
+                if plan != expected_plan:
+                    logger.info("invalid plan (out of sync) for '%s", service.name)
+                    is_invalid = True
+                    break  # guaranteed replan, exit loop
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s'", service.name)
                 is_down = True
@@ -259,10 +266,10 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("invalid plan detected, attempting replanning")
             self._update(event)
         elif is_not_ready:
-            logger.info("services not ready, exiting to wait the next update")
+            logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
-            logger.info("services down, exiting to wait the next update")
+            logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
             self.unit.status = ops.ActiveStatus()
