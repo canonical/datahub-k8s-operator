@@ -358,10 +358,10 @@ class FrontendService(AbstractService):
             raise exceptions.ImproperSecretError("secret pointed to by 'oidc-secret-id' has improper contents")
 
         oidc_base_url = "http://localhost:9002"
-        if context.charm.config.external_hostname:
+        if context.charm.config.external_fe_hostname:
             # OIDC mandates the use of TLS, so the protocol is correct.
             # TODO (mertalpt): Add a check when OIDC is enabled without TLS.
-            oidc_base_url = f"https://{context.charm.config.external_hostname}"
+            oidc_base_url = f"https://{context.charm.config.external_fe_hostname}"
 
         oidc_env = {
             "AUTH_OIDC_ENABLED": "true",

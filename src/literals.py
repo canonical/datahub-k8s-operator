@@ -7,6 +7,7 @@ DB_NAME = "datahub_db"
 PLACEHOLDER_INDEX = "datahub_index"
 PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
+GMS_PORT = 8080
 
 RUNNER_SRC_PATH = ("src", "scripts", "runner.sh")
 RUNNER_DEST_PATH = "/charm-external/runner.sh"
