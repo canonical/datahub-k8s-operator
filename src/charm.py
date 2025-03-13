@@ -253,7 +253,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 plan = container.get_plan()
                 expected_plan = get_pebble_layer(service, context)
                 if plan != expected_plan:
-                    logger.info("invalid plan (out of sync) for '%s", service.name)
+                    logger.info("invalid plan (out of sync) for '%s'", service.name)
                     is_invalid = True
                     break  # guaranteed replan, exit loop
             if check.status != CheckStatus.UP:
