@@ -340,11 +340,9 @@ class FrontendService(AbstractService):
             https_proxy = urlparse(https_proxy_raw)
             proxy_vars["HTTPS_PROXY_HOST"] = https_proxy.hostname
             proxy_vars["HTTPS_PROXY_PORT"] = str(https_proxy.port or "")
-        if no_proxy_raw := os.getenv("JUJU_CHARM_NO_PROXY"):
-            no_proxy = no_proxy_raw.split(",")
-            no_proxy_hosts = no_proxy_hosts.union(no_proxy)
-            proxy_vars["HTTP_NON_PROXY_HOSTS"] = "|".join(no_proxy_hosts)
 
+        # TODO (mertalpt): Figure out a way to integrate model no proxy hosts into the charm.
+        proxy_vars["HTTP_NON_PROXY_HOSTS"] = "|".join(no_proxy_hosts)
         env.update(proxy_vars)
 
         # Set up OIDC if needed.
