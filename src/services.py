@@ -1116,7 +1116,7 @@ class UpgradeService(AbstractService):
         # In order to fit the pattern of services, we loosen the semantics.
         # The "initialization" for 'Upgrade' actually runs an upgrade for the whole ecosystem.
         if context.charm._state.ran_upgrade:
-            logger.info("Already ran datahub-upgrade, skipping initialization")
+            logger.debug("Already ran datahub-upgrade, skipping initialization")
             return False
 
         # We need to ensure that the truststore is configured first.

@@ -60,7 +60,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
         "override": "replace",
     }
     layer = {
-        "summary": f"DataHub layer for '{service.name}'",
+        # "summary": f"DataHub layer for '{service.name}'",
         "services": {
             service.name: svc_dict,
         },
@@ -82,6 +82,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
                     "up": {
                         "override": "replace",
                         "period": "10s",
+                        "threshold": 3,
                         "http": {
                             "url": f"http://localhost:{service.healthcheck['port']}{service.healthcheck['endpoint']}"
                         },
@@ -267,11 +268,16 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 is_invalid = True
                 break  # guaranteed replan, exit loop
             else:
-                plan = container.get_plan()
+                plan = container.get_plan().to_dict()
                 expected_plan = get_pebble_layer(service, context)
-                if plan != expected_plan:
+                # `get_plan` returns a `dict` subclass that messes with comparison.
+                if dict(plan) != expected_plan:
                     logger.info("invalid plan (out of sync) for '%s'", service.name)
                     is_invalid = True
+                    # TODO (mertalpt): Remove this before it gets merged.
+                    diff_1 = {k: v for k, v in plan.items() if k not in expected_plan or (k in expected_plan and v != expected_plan[k])}
+                    diff_2 = {k: v for k, v in expected_plan.items() if k not in plan or (k in plan and v != plan[k])}
+                    logger.debug("plan \\ expected plan: '%s'\nexpect plan \\ plan: '%s'", str(diff_1), str(diff_2))
                     break  # guaranteed replan, exit loop
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s'", service.name)
