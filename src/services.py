@@ -316,6 +316,9 @@ class FrontendService(AbstractService):
             "ELASTIC_CLIENT_USERNAME": os_conn["username"],
             "ELASTIC_CLIENT_PASSWORD": os_conn["password"],
             "AUTH_SESSION_TTL_HOURS": "24",
+            # TODO (mertalpt): Consider making this a config option.
+            # Required for access tokens, i.e. service accounts.
+            "METADATA_SERVICE_AUTH_ENABLED": "true",
         }
         # Ref: https://datahubproject.io/docs/troubleshooting/quickstart/#ive-configured-oidc-but-i-cannot-login-i-get-continuously-redirected-what-do-i-do  # noqa
         if context.charm.config.use_play_cache_session_store:
@@ -558,6 +561,9 @@ class GMSService(AbstractService):
             "ALWAYS_EMIT_CHANGE_LOG": "false",
             "GRAPH_SERVICE_DIFF_MODE_ENABLED": "true",
             "GRAPHQL_QUERY_INTROSPECTION_ENABLED": "true",
+            # TODO (mertalpt): Consider making this a config option.
+            # Required for access tokens, i.e. service accounts.
+            "METADATA_SERVICE_AUTH_ENABLED": "true",
         }
         if context.charm.config.opensearch_index_prefix:
             env["INDEX_PREFIX"] = context.charm.config.opensearch_index_prefix
