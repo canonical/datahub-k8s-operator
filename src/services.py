@@ -316,6 +316,9 @@ class FrontendService(AbstractService):
             "ELASTIC_CLIENT_USERNAME": os_conn["username"],
             "ELASTIC_CLIENT_PASSWORD": os_conn["password"],
             "AUTH_SESSION_TTL_HOURS": "24",
+            # TODO (mertalpt): Consider making this a config option.
+            # Required for access tokens, i.e. service accounts.
+            "METADATA_SERVICE_AUTH_ENABLED": "true",
         }
         # Ref: https://datahubproject.io/docs/troubleshooting/quickstart/#ive-configured-oidc-but-i-cannot-login-i-get-continuously-redirected-what-do-i-do  # noqa
         if context.charm.config.use_play_cache_session_store:
@@ -358,10 +361,10 @@ class FrontendService(AbstractService):
             raise exceptions.ImproperSecretError("secret pointed to by 'oidc-secret-id' has improper contents")
 
         oidc_base_url = "http://localhost:9002"
-        if context.charm.config.external_hostname:
+        if context.charm.config.external_fe_hostname:
             # OIDC mandates the use of TLS, so the protocol is correct.
             # TODO (mertalpt): Add a check when OIDC is enabled without TLS.
-            oidc_base_url = f"https://{context.charm.config.external_hostname}"
+            oidc_base_url = f"https://{context.charm.config.external_fe_hostname}"
 
         oidc_env = {
             "AUTH_OIDC_ENABLED": "true",
@@ -558,6 +561,9 @@ class GMSService(AbstractService):
             "ALWAYS_EMIT_CHANGE_LOG": "false",
             "GRAPH_SERVICE_DIFF_MODE_ENABLED": "true",
             "GRAPHQL_QUERY_INTROSPECTION_ENABLED": "true",
+            # TODO (mertalpt): Consider making this a config option.
+            # Required for access tokens, i.e. service accounts.
+            "METADATA_SERVICE_AUTH_ENABLED": "true",
         }
         if context.charm.config.opensearch_index_prefix:
             env["INDEX_PREFIX"] = context.charm.config.opensearch_index_prefix
@@ -1116,7 +1122,7 @@ class UpgradeService(AbstractService):
         # In order to fit the pattern of services, we loosen the semantics.
         # The "initialization" for 'Upgrade' actually runs an upgrade for the whole ecosystem.
         if context.charm._state.ran_upgrade:
-            logger.info("Already ran datahub-upgrade, skipping initialization")
+            logger.debug("Already ran datahub-upgrade, skipping initialization")
             return False
 
         # We need to ensure that the truststore is configured first.

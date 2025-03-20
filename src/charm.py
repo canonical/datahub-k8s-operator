@@ -59,8 +59,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
         "startup": "enabled" if service.is_enabled(context) else "disabled",
         "override": "replace",
     }
-    layer = {
-        "summary": f"DataHub layer for '{service.name}'",
+    layer: Dict = {
         "services": {
             service.name: svc_dict,
         },
@@ -82,6 +81,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
                     "up": {
                         "override": "replace",
                         "period": "10s",
+                        "threshold": 3,
                         "http": {
                             "url": f"http://localhost:{service.healthcheck['port']}{service.healthcheck['endpoint']}"
                         },
@@ -99,7 +99,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     Attributes:
         _state: Used to store persistent data between invocations.
         config_type: Class used to store the config.
-        external_hostname: Property for the hostname of the unit visible to outside.
+        external_fe_hostname: Property for the hostname of the frontend visible to outside.
+        external_gms_hostname: Property for the hostname of the GMS visible to outside.
     """
 
     config_type = CharmConfig
@@ -147,19 +148,35 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
 
     @property
-    def external_hostname(self):
-        """Return the DNS listing used for external connections."""
-        return self.config["external-hostname"] or self.app.name
+    def external_fe_hostname(self):
+        """Return the hostname used for external connections to the frontend."""
+        return self.config["external-fe-hostname"] or f"{self.app.name}-frontend"
+
+    @property
+    def external_gms_hostname(self):
+        """Return the hostname used for external connections to the GMS."""
+        return self.config["external-gms-hostname"] or f"{self.app.name}-gms"
 
     def _require_nginx_route(self):
         """Require nginx-route relation based on the current configuration."""
         require_nginx_route(
             charm=self,
-            service_hostname=self.external_hostname,
+            service_hostname=self.external_fe_hostname,
             service_name=self.app.name,
             service_port=literals.FRONTEND_PORT,
             tls_secret_name=self.config["tls-secret-name"] or "",
             backend_protocol="HTTP",
+            nginx_route_relation_name="nginx-fe-route",
+        )
+
+        require_nginx_route(
+            charm=self,
+            service_hostname=self.external_gms_hostname,
+            service_name=self.app.name,
+            service_port=literals.GMS_PORT,
+            tls_secret_name=self.config["tls-secret-name"] or "",
+            backend_protocol="HTTP",
+            nginx_route_relation_name="nginx-gms-route",
         )
 
     @log_event_handler(logger)
@@ -250,9 +267,10 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 is_invalid = True
                 break  # guaranteed replan, exit loop
             else:
-                plan = container.get_plan()
+                plan = container.get_plan().to_dict()
                 expected_plan = get_pebble_layer(service, context)
-                if plan != expected_plan:
+                # `get_plan` returns a `dict` subclass that messes with comparison.
+                if dict(plan) != expected_plan:
                     logger.info("invalid plan (out of sync) for '%s'", service.name)
                     is_invalid = True
                     break  # guaranteed replan, exit loop
@@ -335,7 +353,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return
 
         # Set ports.
-        self.model.unit.set_ports(literals.FRONTEND_PORT)
+        self.model.unit.set_ports(literals.FRONTEND_PORT, literals.GMS_PORT)
 
         context = services.ServiceContext(self)
 
