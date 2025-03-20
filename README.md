@@ -89,6 +89,13 @@ juju relate datahub-k8s os-client
 
 # Get the address of DataHub
 juju status | grep "^datahub-k8s\s" | grep -P "10\.\d+\.\d+\.\d+" | awk '{print $6}'
+
+# Get the initial admin credentials
+# Username is 'datahub' by default
+# Auto-generated password can be get via the command below
+juju show-secret --reveal --format json $(juju list-secrets --format json | \
+    jq -r 'to_entries | map(select(.value.label=="datahub-init-pwd")) | .[0].key') | \
+    jq -r 'map(.content.Data.password) | .[0]'
 ```
 
 After relations are set and settled, you can access DataHub at its address with port `9002` from your browser.

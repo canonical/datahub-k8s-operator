@@ -5,16 +5,65 @@
 """Run integration tests."""
 
 import asyncio
+import json
 import logging
+import os
 from pathlib import Path
+import subprocess
 
 import helpers
+import literals
 import pytest
 import requests
 from pytest_operator.plugin import OpsTest
 
 logger = logging.getLogger(__name__)
 
+
+def _get_password() -> str:
+    proc = None
+    try:
+        proc = subprocess.run(
+            [
+                "/snap/bin/juju",
+                "list-secrets",
+                "--format",
+                "json",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy().update({"NO_COLOR": "true"}),
+        )
+    except subprocess.CalledProcessError as e:
+        # Messy but should be acceptable in tests
+        print(e.stdout)
+        print(e.stderr)
+        raise
+
+    secrets = json.loads(proc.stdout)
+    name = next(k for k, v in secrets.items() if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL)
+
+    try:
+        proc = subprocess.run(
+            [
+                "/snap/bin/juju",
+                "show-secret",
+                name,
+                "--format",
+                "json",
+                "--reveal",
+            ]
+        )
+    except subprocess.CalledProcessError as e:
+        # Messy but should be acceptable in tests
+        print(e.stdout)
+        print(e.stderr)
+        raise
+
+    secret = json.loads(proc.stdout)
+    return secret[name]["content"]["Data"]["password"]
 
 @pytest.mark.abort_on_fail
 class TestDeployment:
@@ -198,10 +247,13 @@ class TestDeployment:
             logger.info("Building unit url")
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
 
+            logger.info("Fetching admin password")
+            admin_pwd = _get_password()
+
             with requests.session() as s:
                 # Log in
                 url = f"{base_url}/logIn"
                 logging.info("Request to: '%s' - running", url)
-                r = s.post(url, json={"username": "datahub", "password": "datahub"})
+                r = s.post(url, json={"username": "datahub", "password": admin_pwd})
                 assert r.status_code == 200
                 logging.info("Request to: '%s' - passed", url)

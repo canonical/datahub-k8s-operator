@@ -83,10 +83,10 @@ Deploying Opensearch:
 ```shell
 juju switch lxd:datahub-vm
 # Less than 3 units might work for a while but is prone to blocking
-juju deploy opensearch --channel 2/edge -n 3
+juju deploy opensearch --channel 2/edge -n 2
 juju deploy self-signed-certificates
 juju deploy postgresql --channel 14/stable
-juju deploy kafka
+juju deploy kafka --channel 3/edge
 juju deploy zookeeper
 juju integrate opensearch self-signed-certificates
 juju integrate kafka zookeeper

@@ -9,6 +9,8 @@ PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
 GMS_PORT = 8080
 
+INIT_PWD_SECRET_LABEL = "datahub-init-pwd"
+
 RUNNER_SRC_PATH = ("src", "scripts", "runner.sh")
 RUNNER_DEST_PATH = "/charm-external/runner.sh"
 TRUSTSTORE_INIT_SCRIPT_SRC_PATH = ("src", "scripts", "init-truststore.sh")
