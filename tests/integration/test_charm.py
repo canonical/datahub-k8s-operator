@@ -8,19 +8,25 @@ import asyncio
 import json
 import logging
 import os
+import subprocess  # nosec
 from pathlib import Path
-import subprocess
 
 import helpers
-import literals
 import pytest
 import requests
 from pytest_operator.plugin import OpsTest
+
+import literals
 
 logger = logging.getLogger(__name__)
 
 
 def _get_password() -> str:
+    """Get admin password from the Juju secret.
+
+    Raises:
+        CalledProcessError: If command executions fail.
+    """
     proc = None
     try:
         proc = subprocess.run(
@@ -35,15 +41,16 @@ def _get_password() -> str:
             stderr=subprocess.PIPE,
             text=True,
             env=os.environ.copy().update({"NO_COLOR": "true"}),
-        )
+        )  # nosec
     except subprocess.CalledProcessError as e:
-        # Messy but should be acceptable in tests
-        print(e.stdout)
-        print(e.stderr)
+        logger.error("Error stdout fetching secrets: '%s'", e.stdout)
+        logger.error("Error stderr fetching secrets: '%s'", e.stderr)
         raise
 
     secrets = json.loads(proc.stdout)
-    name = next(k for k, v in secrets.items() if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL)
+    name = next(
+        k for k, v in secrets.items() if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL
+    )
 
     try:
         proc = subprocess.run(
@@ -54,16 +61,21 @@ def _get_password() -> str:
                 "--format",
                 "json",
                 "--reveal",
-            ]
-        )
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ.copy().update({"NO_COLOR": "true"}),
+        )  # nosec
     except subprocess.CalledProcessError as e:
-        # Messy but should be acceptable in tests
-        print(e.stdout)
-        print(e.stderr)
+        logger.error("Error stdout fetching password secret: '%s'", e.stdout)
+        logger.error("Error stderr fetching password secret: '%s'", e.stderr)
         raise
 
     secret = json.loads(proc.stdout)
     return secret[name]["content"]["Data"]["password"]
+
 
 @pytest.mark.abort_on_fail
 class TestDeployment:

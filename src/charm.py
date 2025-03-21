@@ -339,8 +339,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             # Store the secret id in the peer relation for other units if required
             relation.data[self.app]["initial-admin-password"] = secret.id
             return content["password"]
-        else:
-            return ""
+
+        return ""
 
     def _require_nginx_route(self):
         """Require nginx-route relation based on the current configuration."""
