@@ -70,8 +70,8 @@ async def _get_password() -> str:  # noqa C901
         logger.info("Found the password secret with id: '%s'", name)
     except StopIteration as e:
         logger.error(
-            "Error searching the password secret with id: '%s'\nError was: '%s'\nSecrets were: %s",
-            name,
+            "Error searching the password secret with label: '%s'\nError was: '%s'\nSecrets were: %s",
+            literals.INIT_PWD_SECRET_LABEL,
             str(e),
             secrets,
         )
