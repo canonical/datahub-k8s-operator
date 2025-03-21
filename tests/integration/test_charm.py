@@ -21,59 +21,79 @@ import literals
 logger = logging.getLogger(__name__)
 
 
-def _get_password() -> str:
+async def _get_password() -> str:
     """Get admin password from the Juju secret.
 
     Raises:
         CalledProcessError: If command executions fail.
+        Exception: If an unknown error happens during command execution.
     """
     proc = None
     try:
-        proc = subprocess.run(
-            [
-                "/snap/bin/juju",
-                "list-secrets",
-                "--format",
-                "json",
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+        cmd = [
+            "/snap/bin/juju",
+            "list-secrets",
+            "--format",
+            "json",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env=os.environ.copy().update({"NO_COLOR": "true"}),
-        )  # nosec
+        )
+
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode or 1, cmd, output=stdout, stderr=stderr)
+
     except subprocess.CalledProcessError as e:
-        logger.error("Error stdout fetching secrets: '%s'", e.stdout)
-        logger.error("Error stderr fetching secrets: '%s'", e.stderr)
+        logger.error("Error stdout fetching password secret: '%s'", e.output)
+        logger.error("Error stderr fetching password secret: '%s'", e.stderr)
+        raise
+    except Exception as e:
+        logger.error("Error fetching secrets: '%s'", str(e))
         raise
 
-    secrets = json.loads(proc.stdout)
+    secrets = json.loads(stdout)
     name = next(
         k for k, v in secrets.items() if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL
     )
+    logger.info("Found the password secret with id: '%s'", name)
 
     try:
-        proc = subprocess.run(
-            [
-                "/snap/bin/juju",
-                "show-secret",
-                name,
-                "--format",
-                "json",
-                "--reveal",
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+        cmd = [
+            "/snap/bin/juju",
+            "show-secret",
+            name,
+            "--format",
+            "json",
+            "--reveal",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env=os.environ.copy().update({"NO_COLOR": "true"}),
-        )  # nosec
+        )
+
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode or 1, cmd, output=stdout, stderr=stderr)
+
     except subprocess.CalledProcessError as e:
-        logger.error("Error stdout fetching password secret: '%s'", e.stdout)
+        logger.error("Error stdout fetching password secret: '%s'", e.output)
         logger.error("Error stderr fetching password secret: '%s'", e.stderr)
         raise
+    except Exception as e:
+        logger.error("Unknown error fetching secrets: '%s'", str(e))
+        raise
 
-    secret = json.loads(proc.stdout)
+    logger.info("Fetched the password secret with id: '%s'", name)
+
+    secret = json.loads(stdout)
     return secret[name]["content"]["Data"]["password"]
 
 
@@ -260,7 +280,7 @@ class TestDeployment:
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
 
             logger.info("Fetching admin password")
-            admin_pwd = _get_password()
+            admin_pwd = await _get_password()
 
             with requests.session() as s:
                 # Log in
