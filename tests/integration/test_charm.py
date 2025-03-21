@@ -21,12 +21,13 @@ import literals
 logger = logging.getLogger(__name__)
 
 
-async def _get_password() -> str:
+async def _get_password() -> str:  # noqa C901
     """Get admin password from the Juju secret.
 
     Raises:
         CalledProcessError: If command executions fail.
         Exception: If an unknown error happens during command execution.
+        ValueError: If the password secret is not found.
     """
     proc = None
     try:
@@ -43,7 +44,9 @@ async def _get_password() -> str:
             env=os.environ.copy().update({"NO_COLOR": "true"}),
         )
 
-        stdout, stderr = await proc.communicate()
+        _stdout, _stderr = await proc.communicate()
+        stdout = _stdout.decode("utf-8")
+        stderr = _stderr.decode("utf-8")
 
         if proc.returncode != 0:
             raise subprocess.CalledProcessError(proc.returncode or 1, cmd, output=stdout, stderr=stderr)
@@ -57,10 +60,22 @@ async def _get_password() -> str:
         raise
 
     secrets = json.loads(stdout)
-    name = next(
-        k for k, v in secrets.items() if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL
-    )
-    logger.info("Found the password secret with id: '%s'", name)
+
+    try:
+        name = next(
+            k
+            for k, v in secrets.items()
+            if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL
+        )
+        logger.info("Found the password secret with id: '%s'", name)
+    except StopIteration as e:
+        logger.error(
+            "Error searching the password secret with id: '%s'\nError was: '%s'\nSecrets were: %s",
+            name,
+            str(e),
+            secrets,
+        )
+        raise ValueError("Password secret not found.")
 
     try:
         cmd = [
@@ -78,7 +93,9 @@ async def _get_password() -> str:
             env=os.environ.copy().update({"NO_COLOR": "true"}),
         )
 
-        stdout, stderr = await proc.communicate()
+        _stdout, _stderr = await proc.communicate()
+        stdout = _stdout.decode("utf-8")
+        stderr = _stderr.decode("utf-8")
 
         if proc.returncode != 0:
             raise subprocess.CalledProcessError(proc.returncode or 1, cmd, output=stdout, stderr=stderr)
