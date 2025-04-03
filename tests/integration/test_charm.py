@@ -21,8 +21,11 @@ import literals
 logger = logging.getLogger(__name__)
 
 
-async def _get_password() -> str:  # noqa C901
+async def _get_password(model_name: str) -> str:  # noqa C901
     """Get admin password from the Juju secret.
+
+    Args:
+        model_name: Name of the model to get the password secret from.
 
     Raises:
         CalledProcessError: If command executions fail.
@@ -34,6 +37,8 @@ async def _get_password() -> str:  # noqa C901
         cmd = [
             "/snap/bin/juju",
             "list-secrets",
+            "--model",
+            model_name,
             "--format",
             "json",
         ]
@@ -82,6 +87,8 @@ async def _get_password() -> str:  # noqa C901
             "/snap/bin/juju",
             "show-secret",
             name,
+            "--model",
+            model_name,
             "--format",
             "json",
             "--reveal",
@@ -297,7 +304,7 @@ class TestDeployment:
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
 
             logger.info("Fetching admin password")
-            admin_pwd = await _get_password()
+            admin_pwd = await _get_password(k8s_model)
 
             with requests.session() as s:
                 # Log in
