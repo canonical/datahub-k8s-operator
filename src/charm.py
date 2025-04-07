@@ -5,6 +5,7 @@
 """Charm the application."""
 
 import logging
+import secrets
 from typing import Dict, List, Type, Union
 
 import ops
@@ -59,8 +60,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
         "startup": "enabled" if service.is_enabled(context) else "disabled",
         "override": "replace",
     }
-    layer = {
-        "summary": f"DataHub layer for '{service.name}'",
+    layer: Dict = {
         "services": {
             service.name: svc_dict,
         },
@@ -82,6 +82,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
                     "up": {
                         "override": "replace",
                         "period": "10s",
+                        "threshold": 3,
                         "http": {
                             "url": f"http://localhost:{service.healthcheck['port']}{service.healthcheck['endpoint']}"
                         },
@@ -99,7 +100,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     Attributes:
         _state: Used to store persistent data between invocations.
         config_type: Class used to store the config.
-        external_hostname: Property for the hostname of the unit visible to outside.
+        external_fe_hostname: Property for the hostname of the frontend visible to outside.
+        external_gms_hostname: Property for the hostname of the GMS visible to outside.
     """
 
     config_type = CharmConfig
@@ -113,6 +115,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         super().__init__(framework)
         self._state = State(self.app, lambda: self.model.get_relation("peer"))
 
+        # Services
+        for service in SERVICES:
+            self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.peer_relation_changed, self._on_peer_relation_changed)
         self.framework.observe(self.on.update_status, self._on_update_status)
@@ -142,25 +147,15 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Ingress
         self._require_nginx_route()
 
-        # Services
-        for service in SERVICES:
-            self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
+    @property
+    def external_fe_hostname(self):
+        """Return the hostname used for external connections to the frontend."""
+        return self.config["external-fe-hostname"] or f"{self.app.name}-frontend"
 
     @property
-    def external_hostname(self):
-        """Return the DNS listing used for external connections."""
-        return self.config["external-hostname"] or self.app.name
-
-    def _require_nginx_route(self):
-        """Require nginx-route relation based on the current configuration."""
-        require_nginx_route(
-            charm=self,
-            service_hostname=self.external_hostname,
-            service_name=self.app.name,
-            service_port=literals.FRONTEND_PORT,
-            tls_secret_name=self.config["tls-secret-name"] or "",
-            backend_protocol="HTTP",
-        )
+    def external_gms_hostname(self):
+        """Return the hostname used for external connections to the GMS."""
+        return self.config["external-gms-hostname"] or f"{self.app.name}-gms"
 
     @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
@@ -180,10 +175,14 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Frontend service requires a file to be present at startup.
         if event.workload.name == services.FrontendService.name:
             self._state.frontend_truststore_initialized = False
-            # TODO (mertalpt): Seek to make the default user configurable.
+            password = self._generated_password()
+            if not password:
+                logger.info("could not generate admin password, will defer frontend initialization")
+                event.defer()
+            logger.debug("initial admin password generation successful")
             utils.push_contents_to_file(
                 event.workload,
-                "datahub:datahub",
+                f"datahub:{password}",
                 "/etc/datahub/plugins/frontend/auth/user.props",
                 0o644,
             )
@@ -246,9 +245,17 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             try:
                 check = container.get_check("up")
             except ops.model.ModelError:
-                logger.info("invalid plan for '%s'", service.name)
+                logger.info("invalid plan (missing check) for '%s'", service.name)
                 is_invalid = True
-                continue
+                break  # guaranteed replan, exit loop
+            else:
+                plan = container.get_plan().to_dict()
+                expected_plan = get_pebble_layer(service, context)
+                # `get_plan` returns a `dict` subclass that messes with comparison.
+                if dict(plan) != expected_plan:
+                    logger.info("invalid plan (out of sync) for '%s'", service.name)
+                    is_invalid = True
+                    break  # guaranteed replan, exit loop
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s'", service.name)
                 is_down = True
@@ -259,10 +266,10 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("invalid plan detected, attempting replanning")
             self._update(event)
         elif is_not_ready:
-            logger.info("services not ready, exiting to wait the next update")
+            logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
-            logger.info("services down, exiting to wait the next update")
+            logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
             self.unit.status = ops.ActiveStatus()
@@ -312,6 +319,52 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             err = f"missing required relation(s): {', '.join(missing_relations)}"
             raise exceptions.UnreadyStateError(err)
 
+    # Ref: https://github.com/jnsgruk/zinc-k8s-operator/blob/b1d5d9b19628480e2f8c3774d055b966fbb9e7ab/src/charm.py#L78  # noqa
+    def _generated_password(self):
+        """Report the generated admin passport; generate one if it does not exist."""
+        # If the peer relation is not ready, just return an empty string
+        relation = self.model.get_relation("peer")
+        if not relation:
+            return ""
+
+        # If the secret already exists, grab its content and return it
+        secret_id = relation.data[self.app].get(literals.INIT_PWD_SECRET_LABEL, None)
+        if secret_id:
+            secret = self.model.get_secret(id=secret_id)
+            return secret.peek_content().get("password")
+
+        if self.unit.is_leader():
+            content = {"password": secrets.token_urlsafe(24)}
+            secret = self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
+            # Store the secret id in the peer relation for other units if required
+            relation.data[self.app][literals.INIT_PWD_SECRET_LABEL] = secret.id
+            return content["password"]
+
+        return ""
+
+    def _require_nginx_route(self):
+        """Require nginx-route relation based on the current configuration."""
+        # TODO (mertalpt): Ensure `tls_secret_name` functionality works or remove it entirely.
+        require_nginx_route(
+            charm=self,
+            service_hostname=self.external_fe_hostname,
+            service_name=self.app.name,
+            service_port=literals.FRONTEND_PORT,
+            tls_secret_name=self.config["tls-secret-name"] or "",
+            backend_protocol="HTTP",
+            nginx_route_relation_name="nginx-fe-route",
+        )
+
+        require_nginx_route(
+            charm=self,
+            service_hostname=self.external_gms_hostname,
+            service_name=self.app.name,
+            service_port=literals.GMS_PORT,
+            tls_secret_name=self.config["tls-secret-name"] or "",
+            backend_protocol="HTTP",
+            nginx_route_relation_name="nginx-gms-route",
+        )
+
     def _update(self, event):
         """Update the DataHub configuration and replan its execution.
 
@@ -328,7 +381,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return
 
         # Set ports.
-        self.model.unit.set_ports(literals.FRONTEND_PORT)
+        self.model.unit.set_ports(literals.FRONTEND_PORT, literals.GMS_PORT)
 
         context = services.ServiceContext(self)
 

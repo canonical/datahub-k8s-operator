@@ -77,16 +77,17 @@ juju model-config logging-config="<root>=INFO;unit=DEBUG"
 
 ## Deploy the dependencies
 
-DataHub has PostgreSQL, Kafka, and OpenSearch as dependencies. Opensearch only has a machine charm, while the others have both a machine and a Kubernetes charm. In production, all of the dependencies are intended to be deployed on machines but for simplification of development purposes you can have only Opensearch on a machine and deploy the rest on `microk8s`. So, the instructions here will cover that scenario.
+DataHub has PostgreSQL, Kafka, and OpenSearch as dependencies. Opensearch only has a machine charm, while the others have both a machine and a Kubernetes charm. However, the main deployment scenario is one where dependencies are deployed as machine charms. So, the documentation covers it.
 
-Deploying Opensearch:
+Deploying dependencies and creating offers:
 ```shell
 juju switch lxd:datahub-vm
-# Less than 3 units might work for a while but is prone to blocking
-juju deploy opensearch --channel 2/edge -n 3
+# Opensearch charms needs a minimum of two units to cover 
+# the indexes created by DataHub
+juju deploy opensearch --channel 2/edge -n 2
 juju deploy self-signed-certificates
 juju deploy postgresql --channel 14/stable
-juju deploy kafka
+juju deploy kafka --channel 3/edge
 juju deploy zookeeper
 juju integrate opensearch self-signed-certificates
 juju integrate kafka zookeeper
@@ -95,7 +96,7 @@ juju offer postgresql:database pg-client
 juju offer kafka:kafka-client kafka-client
 ```
 
-Deploying other dependencies:
+Consuming offers:
 ```shell
 juju switch microk8s:datahub-k8s
 juju consume lxd:admin/datahub-vm.os-client os-client
@@ -157,6 +158,9 @@ juju deploy ./datahub-k8s_ubuntu-22.04-amd64.charm \
 --resource datahub-postgresql-setup=acryldata/datahub-postgres-setup:v0.13.3 \
 --resource datahub-upgrade=acryldata/datahub-upgrade:v0.13.3 \
 --config encryption-keys-secret-id=<secret-id>
+
+# Grant secret
+juju grant-secret <secret-name> datahub-k8s
 ```
 
 **Note:** The configuration variables need to be set at deployment time and they should not be changed afterwards. DataHub expects these secrets to be secure, so ensure you have a secret with sufficient entropy. Future updates will make QoL changes here to make this easier to manage.
@@ -171,7 +175,7 @@ juju integrate datahub-k8s os-client
 
 **Note:** It is highly recommended to wait between commands to let `juju status` show an `active-idle` status for the charm.
 
-After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on `localhost:9002` with `datahub` for both username and password. Refer to [below](#accessing-datahub-from-the-host-machine) on how to connect to a `datahub` deployment inside a `multipass` VM.
+After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on `localhost:9002` with `datahub` for the username and the password fetched as described in the [README](./README.md#deploying-datahub). Refer to [below](#accessing-datahub-from-the-host-machine) on how to connect to a `datahub` deployment inside a `multipass` VM.
 
 **Note:** If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not load. This is best identified by the requests to `/graphql` returning a `500`.
 

@@ -5,7 +5,10 @@
 """Run integration tests."""
 
 import asyncio
+import json
 import logging
+import os
+import subprocess  # nosec
 from pathlib import Path
 
 import helpers
@@ -13,7 +16,109 @@ import pytest
 import requests
 from pytest_operator.plugin import OpsTest
 
+import literals
+
 logger = logging.getLogger(__name__)
+
+
+async def _get_password(model_name: str) -> str:  # noqa C901
+    """Get admin password from the Juju secret.
+
+    Args:
+        model_name: Name of the model to get the password secret from.
+
+    Raises:
+        CalledProcessError: If command executions fail.
+        Exception: If an unknown error happens during command execution.
+        ValueError: If the password secret is not found.
+    """
+    proc = None
+    try:
+        cmd = [
+            "/snap/bin/juju",
+            "list-secrets",
+            "--model",
+            model_name,
+            "--format",
+            "json",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=os.environ.copy().update({"NO_COLOR": "true"}),
+        )
+
+        _stdout, _stderr = await proc.communicate()
+        stdout = _stdout.decode("utf-8")
+        stderr = _stderr.decode("utf-8")
+
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode or 1, cmd, output=stdout, stderr=stderr)
+
+    except subprocess.CalledProcessError as e:
+        logger.error("Error stdout fetching password secret: '%s'", e.output)
+        logger.error("Error stderr fetching password secret: '%s'", e.stderr)
+        raise
+    except Exception as e:
+        logger.error("Error fetching secrets: '%s'", str(e))
+        raise
+
+    secrets = json.loads(stdout)
+
+    try:
+        name = next(
+            k
+            for k, v in secrets.items()
+            if v["owner"] == helpers.APP_NAME and v["label"] == literals.INIT_PWD_SECRET_LABEL
+        )
+        logger.info("Found the password secret with id: '%s'", name)
+    except StopIteration as e:
+        logger.error(
+            "Error searching the password secret with label: '%s'\nError was: '%s'\nSecrets were: %s",
+            literals.INIT_PWD_SECRET_LABEL,
+            str(e),
+            secrets,
+        )
+        raise ValueError("Password secret not found.")
+
+    try:
+        cmd = [
+            "/snap/bin/juju",
+            "show-secret",
+            name,
+            "--model",
+            model_name,
+            "--format",
+            "json",
+            "--reveal",
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=os.environ.copy().update({"NO_COLOR": "true"}),
+        )
+
+        _stdout, _stderr = await proc.communicate()
+        stdout = _stdout.decode("utf-8")
+        stderr = _stderr.decode("utf-8")
+
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode or 1, cmd, output=stdout, stderr=stderr)
+
+    except subprocess.CalledProcessError as e:
+        logger.error("Error stdout fetching password secret: '%s'", e.output)
+        logger.error("Error stderr fetching password secret: '%s'", e.stderr)
+        raise
+    except Exception as e:
+        logger.error("Unknown error fetching secrets: '%s'", str(e))
+        raise
+
+    logger.info("Fetched the password secret with id: '%s'", name)
+
+    secret = json.loads(stdout)
+    return secret[name]["content"]["Data"]["password"]
 
 
 @pytest.mark.abort_on_fail
@@ -50,7 +155,7 @@ class TestDeployment:
                 logger.info("Deploying LXD dependencies")
                 await asyncio.gather(
                     ops_test.model.deploy(helpers.KAFKA_NAME, channel=helpers.KAFKA_CHANNEL),
-                    ops_test.model.deploy(helpers.OPENSEARCH_NAME, channel=helpers.OPENSEARCH_CHANNEL, num_units=3),
+                    ops_test.model.deploy(helpers.OPENSEARCH_NAME, channel=helpers.OPENSEARCH_CHANNEL, num_units=2),
                     ops_test.model.deploy(helpers.POSTGRES_NAME, channel=helpers.POSTGRES_CHANNEL),
                     ops_test.model.deploy(helpers.CERTIFICATES_NAME, channel=helpers.CERTIFICATES_CHANNEL),
                     ops_test.model.deploy(helpers.ZOOKEPER_NAME, channel=helpers.ZOOKEEPER_CHANNEL),
@@ -198,10 +303,13 @@ class TestDeployment:
             logger.info("Building unit url")
             base_url = await helpers.get_unit_url(ops_test, helpers.APP_NAME, 0, 9002)
 
+            logger.info("Fetching admin password")
+            admin_pwd = await _get_password(k8s_model)
+
             with requests.session() as s:
                 # Log in
                 url = f"{base_url}/logIn"
                 logging.info("Request to: '%s' - running", url)
-                r = s.post(url, json={"username": "datahub", "password": "datahub"})
+                r = s.post(url, json={"username": "datahub", "password": admin_pwd})
                 assert r.status_code == 200
                 logging.info("Request to: '%s' - passed", url)

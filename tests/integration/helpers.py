@@ -97,7 +97,7 @@ async def deploy_charm(ops_test: OpsTest, charm: Path) -> None:
         raise_on_blocked=False,
         timeout=200,
     )
-    await ops_test.model.integrate(APP_NAME, INGRESS_NAME)
+    await ops_test.model.integrate(f"{APP_NAME}:nginx-fe-route", INGRESS_NAME)
     await ops_test.model.wait_for_idle(
         apps=[INGRESS_NAME],
         status="active",

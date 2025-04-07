@@ -77,6 +77,7 @@ juju add-secret <secret-name> --file=/path/to/secret.yaml  # Copy the ID from th
 
 # Deploy
 juju deploy datahub-k8s --config encryption-key-secret-id=<secret-id>
+juju grant-secret <secret-name> datahub-k8s
 
 # Wait for the unit to settle
 juju status --watch 3s --color
@@ -89,6 +90,13 @@ juju relate datahub-k8s os-client
 
 # Get the address of DataHub
 juju status | grep "^datahub-k8s\s" | grep -P "10\.\d+\.\d+\.\d+" | awk '{print $6}'
+
+# Get the initial admin credentials
+# Username is 'datahub' by default
+# Auto-generated password can be retrieved via the command below
+juju show-secret --reveal --format json $(juju list-secrets --format json | \
+    jq -r 'to_entries | map(select(.value.label=="datahub-init-pwd")) | .[0].key') | \
+    jq -r 'map(.content.Data.password) | .[0]'
 ```
 
 After relations are set and settled, you can access DataHub at its address with port `9002` from your browser.
@@ -98,22 +106,27 @@ After relations are set and settled, you can access DataHub at its address with 
 DataHub supports authentication via SSO. In order to enable it in the charm follow the steps:
 
 1. Issue credentials from Google Cloud via its [dashboard](https://console.cloud.google.com/apis/credentials).
-1.1. On the linked page, click `Create Credentials` and choose `OAuth client ID`.
-1.2. In the next page, choose `Web application` as the type.
-1.3. Give it a name.
-1.4. Under `Authorized redirect URIs`, add a URI that ends with `/callback/oidc` and begins with the domain used to access the DataHub frontend. For local deployment the complete URI would look like `http://localhost:9002/callback/oidc`.
-1.5. Get the `Client ID` and the `Client secret`.
-1.6. Create a YAML file of the following format:
+2. On the linked page, click `Create Credentials` and choose `OAuth client ID`.
+3. In the next page, choose `Web application` as the type.
+4. Give it a name.
+5. Under `Authorized redirect URIs`, add a URI that ends with `/callback/oidc` and begins with the domain used to access the DataHub frontend. For local deployment the complete URI would look like `http://localhost:9002/callback/oidc`.
+6. Get the `Client ID` and the `Client secret`.
+7. Create a YAML file of the following format:
 ```yaml
 client-id: <client-id-value>
 client-secret: <client-secret-value>
 ```
-2. Create a Juju secret.
-2.1. Go into the Juju model where DataHub is (to be) deployed.
-2.2. Run `juju add-secret <secret-name> --file=/path/to/yaml` and copy the secret ID.
-2.3. Deploy DataHub with the added config variable `--config oidc-secret-id=<secret-id>`.
-2.4. Run `juju grant-secret <secret-name> datahub-k8s` to set permissions.
-2.5. Proceed with the relations.
+8. Create a Juju secret.
+9. Go into the Juju model where DataHub is (to be) deployed.
+10. Run `juju add-secret <secret-name> --file=/path/to/yaml` and copy the secret ID.
+11. Deploy DataHub with the added config variable `--config oidc-secret-id=<secret-id>`.
+12. Run `juju grant-secret <secret-name> datahub-k8s` to set permissions.
+13. Proceed with the relations.
+14. If your deployment is behind a HTTP proxy, set it on your Juju model via
+```sh
+juju model-config juju-http-proxy=<http-proxy-address>
+juju model-config juju-https-proxy=<http-proxy-address>
+```
 
 ## Contributing
 This charm is still in active development. Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this charm following best practice guidelines, and [CONTRIBUTING.md](CONTRIBUTING.md) for developer guidance.
