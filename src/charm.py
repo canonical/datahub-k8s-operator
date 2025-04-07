@@ -328,7 +328,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return ""
 
         # If the secret already exists, grab its content and return it
-        secret_id = relation.data[self.app].get("initial-admin-password", None)
+        secret_id = relation.data[self.app].get(literals.INIT_PWD_SECRET_LABEL, None)
         if secret_id:
             secret = self.model.get_secret(id=secret_id)
             return secret.peek_content().get("password")
@@ -337,13 +337,14 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             content = {"password": secrets.token_urlsafe(24)}
             secret = self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
             # Store the secret id in the peer relation for other units if required
-            relation.data[self.app]["initial-admin-password"] = secret.id
+            relation.data[self.app][literals.INIT_PWD_SECRET_LABEL] = secret.id
             return content["password"]
 
         return ""
 
     def _require_nginx_route(self):
         """Require nginx-route relation based on the current configuration."""
+        # TODO (mertalpt): Ensure `tls_secret_name` functionality works or remove it entirely.
         require_nginx_route(
             charm=self,
             service_hostname=self.external_fe_hostname,
