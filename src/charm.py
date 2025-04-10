@@ -183,7 +183,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             utils.push_contents_to_file(
                 event.workload,
                 f"datahub:{password}",
-                "/etc/datahub/plugins/frontend/auth/user.props",
+                "/datahub-frontend/conf/user.props",
                 0o644,
             )
         if event.workload.name == services.GMSService.name:
