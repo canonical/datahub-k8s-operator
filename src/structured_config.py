@@ -16,6 +16,7 @@ class CharmConfig(BaseConfigModel):
     """Manager for the structured configuration.
 
     Attributes:
+        auth_verbose_logging: Enables verbose authentication logging.
         encryption_keys_secret_id: Juju secret ID to use for secret keys.
         use_play_cache_session_store: Flag to determine if Play cache will be used for
             session store instead of having browser based OIDC cookies.
@@ -27,6 +28,7 @@ class CharmConfig(BaseConfigModel):
         tls_secret_name: Name of the k8s secret to use for the TLS certificate.
     """
 
+    auth_verbose_logging: bool = False
     encryption_keys_secret_id: str
     use_play_cache_session_store: bool
     oidc_secret_id: Optional[str] = None

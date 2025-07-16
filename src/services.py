@@ -290,6 +290,7 @@ class FrontendService(AbstractService):
         frontend_secret_key = encryption_secret.get_content(refresh=True)["frontend-key"]
 
         env = {
+            "AUTH_VERBOSE_LOGGING": context.charm.config.auth_verbose_logging,
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
             # TODO (mertalpt): This changes when we split services into multiple charms.

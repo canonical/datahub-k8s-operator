@@ -88,6 +88,13 @@ requires:
 # General configuration documentation: https://juju.is/docs/sdk/config
 config:
   options:
+    auth-verbose-logging:
+      description: |
+        Enable verbose authentication logging. 
+        Enabling this will leak sensisitve information in the logs. 
+        Disable when finished debugging.
+      type: boolean
+      default: false
     encryption-keys-secret-id:
       description: Juju secret ID for the Frontand and GMS encryption keys.
       type: string
