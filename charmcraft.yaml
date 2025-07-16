@@ -158,28 +158,28 @@ resources:
   datahub-actions:
     type: oci-image
     description: OCI image for DataHub Actions
-    upstream-source: acryldata/datahub-actions:v0.0.15
+    upstream-source: acryldata/datahub-actions:v0.2.1
   datahub-frontend:
     type: oci-image
     description: OCI image for DataHub Frontend
-    upstream-source: acryldata/datahub-frontend-react:v0.13.3
+    upstream-source: acryldata/datahub-frontend-react:v1.1.0
   datahub-gms:
     type: oci-image
     description: OCI image for DataHub GMS
-    upstream-source: acryldata/datahub-gms:v0.13.3
+    upstream-source: acryldata/datahub-gms:v1.1.0
   datahub-kafka-setup:
     type: oci-image
     description: OCI image for initialization scripts of Kafka
-    upstream-source: acryldata/datahub-kafka-setup:v0.13.3
+    upstream-source: acryldata/datahub-kafka-setup:v1.1.0
   datahub-opensearch-setup:
     type: oci-image
     description: OCI image for initialization scripts of Opensearch
-    upstream-source: acryldata/datahub-elasticsearch-setup:v0.13.3
+    upstream-source: acryldata/datahub-elasticsearch-setup:v1.1.0
   datahub-postgresql-setup:
     type: oci-image
     description: OCI image for initialization scripts of PostgreSQL
-    upstream-source: acryldata/datahub-postgres-setup:v0.13.3
+    upstream-source: acryldata/datahub-postgres-setup:v1.1.0
   datahub-upgrade:
     type: oci-image
     description: OCI image for initialization scripts of DataHub
-    upstream-source: acryldata/datahub-upgrade:v0.13.3
+    upstream-source: acryldata/datahub-upgrade:v1.1.0

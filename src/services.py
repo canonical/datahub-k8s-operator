@@ -296,7 +296,7 @@ class FrontendService(AbstractService):
             "DATAHUB_GMS_HOST": "localhost",
             "DATAHUB_GMS_PORT": "8080",
             "DATAHUB_SECRET": frontend_secret_key,
-            "DATAHUB_APP_VERSION": "1.0",
+            "DATAHUB_APP_VERSION": "1.1.0",
             "DATAHUB_PLAY_MEM_BUFFER_SIZE": "10MB",
             "DATAHUB_ANALYTICS_ENABLED": "true",
             "KAFKA_BOOTSTRAP_SERVER": kafka_conn["bootstrap_server"],
