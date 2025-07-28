@@ -332,11 +332,11 @@ class FrontendService(AbstractService):
         # Set up proxies if needed.
         # Ref: https://datahubproject.io/docs/authentication/guides/sso/configure-oidc-behind-proxy/  # noqa
         proxy_vars = {}
-        no_proxy_hosts = {"localhost"}
+        no_proxy_hosts = ["localhost"]
         if os.getenv("JUJU_CHARM_NO_PROXY"):
             no_proxy_hosts.extend(str(os.getenv("JUJU_CHARM_NO_PROXY")).split(","))
         if env.get("DATAHUB_GMS_HOST"):
-            no_proxy_hosts.add(env["DATAHUB_GMS_HOST"])
+            no_proxy_hosts.extend(env["DATAHUB_GMS_HOST"])
 
         if http_proxy_raw := os.getenv("JUJU_CHARM_HTTP_PROXY"):
             http_proxy = urlparse(http_proxy_raw)
