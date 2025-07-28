@@ -30,17 +30,22 @@ RESOURCES = {item: METADATA["resources"][item]["upstream-source"] for item in RE
 
 KAFKA_NAME = "kafka"
 KAFKA_CHANNEL = "3/stable"
+KAFKA_REVISION = 195
 KAFKA_OFFER_NAME = "kafka-client"
 OPENSEARCH_NAME = "opensearch"
 OPENSEARCH_CHANNEL = "2/stable"
+OPENSEARCH_REVISION = 168
 OPENSEARCH_OFFER_NAME = "os-client"
 POSTGRES_NAME = "postgresql"
 POSTGRES_CHANNEL = "14/stable"
+POSTGRES_REVISION = 553
 POSTGRES_OFFER_NAME = "pg-client"
 CERTIFICATES_NAME = "self-signed-certificates"
 CERTIFICATES_CHANNEL = "latest/stable"
+CERTIFICATES_REVISION = 264
 ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
+ZOOKEEPER_REVISION = 149
 INGRESS_NAME = "nginx-ingress-integrator"
 INGRESS_CHANNEL = "stable"
 

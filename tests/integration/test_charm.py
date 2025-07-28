@@ -154,11 +154,26 @@ class TestDeployment:
                 # Deploy dependencies
                 logger.info("Deploying LXD dependencies")
                 await asyncio.gather(
-                    ops_test.model.deploy(helpers.KAFKA_NAME, channel=helpers.KAFKA_CHANNEL),
-                    ops_test.model.deploy(helpers.OPENSEARCH_NAME, channel=helpers.OPENSEARCH_CHANNEL, num_units=2),
-                    ops_test.model.deploy(helpers.POSTGRES_NAME, channel=helpers.POSTGRES_CHANNEL),
-                    ops_test.model.deploy(helpers.CERTIFICATES_NAME, channel=helpers.CERTIFICATES_CHANNEL),
-                    ops_test.model.deploy(helpers.ZOOKEPER_NAME, channel=helpers.ZOOKEEPER_CHANNEL),
+                    ops_test.model.deploy(
+                        helpers.KAFKA_NAME, channel=helpers.KAFKA_CHANNEL, revision=helpers.KAFKA_REVISION
+                    ),
+                    ops_test.model.deploy(
+                        helpers.OPENSEARCH_NAME,
+                        channel=helpers.OPENSEARCH_CHANNEL,
+                        num_units=2,
+                        revision=helpers.OPENSEARCH_REVISION,
+                    ),
+                    ops_test.model.deploy(
+                        helpers.POSTGRES_NAME, channel=helpers.POSTGRES_CHANNEL, revision=helpers.POSTGRES_REVISION
+                    ),
+                    ops_test.model.deploy(
+                        helpers.CERTIFICATES_NAME,
+                        channel=helpers.CERTIFICATES_CHANNEL,
+                        revision=helpers.CERTIFICATES_REVISION,
+                    ),
+                    ops_test.model.deploy(
+                        helpers.ZOOKEPER_NAME, channel=helpers.ZOOKEEPER_CHANNEL, revision=helpers.ZOOKEEPER_REVISION
+                    ),
                 )
 
                 # Wait for the dependencies to settle
