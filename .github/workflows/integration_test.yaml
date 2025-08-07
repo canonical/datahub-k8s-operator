@@ -53,3 +53,7 @@ jobs:
       - name: Dump logs
         if: failure()
         uses: canonical/charming-actions/dump-logs@main
+
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: canonical/action-tmate@main

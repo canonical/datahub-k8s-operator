@@ -290,6 +290,7 @@ class FrontendService(AbstractService):
         frontend_secret_key = encryption_secret.get_content(refresh=True)["frontend-key"]
 
         env = {
+            "AUTH_VERBOSE_LOGGING": context.charm.config.auth_verbose_logging,
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
             # TODO (mertalpt): This changes when we split services into multiple charms.
@@ -331,9 +332,11 @@ class FrontendService(AbstractService):
         # Set up proxies if needed.
         # Ref: https://datahubproject.io/docs/authentication/guides/sso/configure-oidc-behind-proxy/  # noqa
         proxy_vars = {}
-        no_proxy_hosts = {"localhost"}
+        no_proxy_hosts = ["localhost"]
+        if os.getenv("JUJU_CHARM_NO_PROXY"):
+            no_proxy_hosts.extend(str(os.getenv("JUJU_CHARM_NO_PROXY")).split(","))
         if env.get("DATAHUB_GMS_HOST"):
-            no_proxy_hosts.add(env["DATAHUB_GMS_HOST"])
+            no_proxy_hosts.extend(env["DATAHUB_GMS_HOST"])
 
         if http_proxy_raw := os.getenv("JUJU_CHARM_HTTP_PROXY"):
             http_proxy = urlparse(http_proxy_raw)
@@ -344,7 +347,6 @@ class FrontendService(AbstractService):
             proxy_vars["HTTPS_PROXY_HOST"] = https_proxy.hostname
             proxy_vars["HTTPS_PROXY_PORT"] = str(https_proxy.port or "")
 
-        # TODO (mertalpt): Figure out a way to integrate model no proxy hosts into the charm.
         proxy_vars["HTTP_NON_PROXY_HOSTS"] = "|".join(no_proxy_hosts)
         env.update(proxy_vars)
 
