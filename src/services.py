@@ -200,6 +200,7 @@ class ActionsService(AbstractService):
         kafka_conn = context.charm._state.kafka_connection
 
         env = {
+            "DATAHUB_TELEMETRY_ENABLED": "false",
             "DATAHUB_GMS_PROTOCOL": "http",
             # TODO (mertalpt): This changes when we split services into multiple charms.
             "DATAHUB_GMS_HOST": "localhost",
@@ -290,7 +291,7 @@ class FrontendService(AbstractService):
         frontend_secret_key = encryption_secret.get_content(refresh=True)["frontend-key"]
 
         env = {
-            "AUTH_VERBOSE_LOGGING": context.charm.config.auth_verbose_logging,
+            "THEME_V2_DEFAULT": "true",
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
             # TODO (mertalpt): This changes when we split services into multiple charms.
@@ -503,6 +504,7 @@ class GMSService(AbstractService):
         gms_secret_key = encryption_secret.get_content(refresh=True)["gms-key"]
 
         env = {
+            "DATAHUB_TELEMETRY_ENABLED": "false",
             "EBEAN_DATASOURCE_PORT": db_conn["port"],
             "SHOW_SEARCH_FILTERS_V2": "true",
             "SHOW_BROWSE_V2": "true",
@@ -743,7 +745,7 @@ class OpensearchSetupService(AbstractService):
             logger.info("Running the initialization script for Opensearch")
             process = container.exec(
                 command=[literals.RUNNER_DEST_PATH, "/create-indices.sh"],
-                timeout=120,
+                timeout=600,
                 environment=environment,
             )
             process.wait_output()
@@ -868,7 +870,7 @@ class KafkaSetupService(AbstractService):
             process = container.exec(
                 command=[literals.RUNNER_DEST_PATH, "/opt/kafka/kafka-setup.sh"],
                 working_dir="/opt/kafka",
-                timeout=120,
+                timeout=600,
                 environment=environment,
             )
             process.wait_output()
@@ -983,7 +985,7 @@ class PostgresqlSetupService(AbstractService):
             logger.info("Running the initialization script for db")
             process = container.exec(
                 command=[literals.RUNNER_DEST_PATH, "/init.sh"],
-                timeout=120,
+                timeout=600,
                 environment=environment,
             )
             process.wait_output()

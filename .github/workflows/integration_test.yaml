@@ -12,7 +12,7 @@ jobs:
   # Ref: https://github.com/canonical/livepatch-k8s-operator/blob/b48995d02f549dca0be46dd15790b5985669d7fe/.github/workflows/integration_test.yaml#L51
   integration-tests:
     name: Integration tests (multi-cloud)
-    runs-on: [self-hosted, linux, X64, jammy, xlarge]
+    runs-on: [self-hosted-linux-amd64-noble-2xlarge]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
