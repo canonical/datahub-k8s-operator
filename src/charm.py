@@ -199,10 +199,14 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The event triggered when the action is triggered.
         """
+        if not self.unit.is_leader():
+            event.fail("This action can only be run on the leader unit.")
+            return
+
         context = services.ServiceContext(self)
         service = services.UpgradeService
-        if not service.is_enabled(context):
-            event.fail("upgrade service is not enabled")
+        if not service.is_ready(context):
+            event.fail("upgrade service is not ready")
             return
 
         container = self.unit.get_container(service.name)
@@ -213,11 +217,13 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         is_success = service.run_reindex(context, clean_index)
 
-        event.set_results(
-            {"result": "command succeeded", "output": "Observe reindexing progress on 'datahub-gms' container logs."}
-            if is_success
-            else {"result": "command failed"}
-        )
+        result = {"result": "command failed"}
+        if is_success:
+            result = {
+                "result": "command succeeded",
+                "output": "Observe reindexing progress on 'datahub-gms' container logs.",
+            }
+        event.set_results(result)
 
     @log_event_handler(logger)
     def _on_config_changed(self, event):
