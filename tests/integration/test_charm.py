@@ -328,3 +328,17 @@ class TestDeployment:
                 r = s.post(url, json={"username": "datahub", "password": admin_pwd})
                 assert r.status_code == 200
                 logging.info("Request to: '%s' - passed", url)
+
+    async def test_reindex_action(self, ops_test: OpsTest):
+        """Test the reindex action."""
+        label = "full-deploy"
+        k8s_model = await helpers.ensure_model(label, ops_test, "microk8s", "k8s")
+
+        logger.info("Testing reindex action")
+        with ops_test.model_context(k8s_model):
+            action = await ops_test.model.applications[helpers.APP_NAME].units[0].run_action("reindex", clean=True)
+            logger.info("Reindex action started")
+            action_output = await action.wait()
+            logger.info(f"action result: {action_output.results}")
+
+            assert "result" in action_output.results and "command succeeded" in action_output.results["result"]

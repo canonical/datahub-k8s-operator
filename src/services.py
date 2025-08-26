@@ -1201,3 +1201,42 @@ class UpgradeService(AbstractService):
         logger.info("Successful datahub-upgrade run")
         context.charm._state.ran_upgrade = True
         return True
+
+    @classmethod
+    def run_reindex(cls, context: ServiceContext, clean: bool) -> bool:
+        """Run reindexing using datahub-upgrade service.
+
+        Args:
+            context: Context for the service.
+            clean: Whether or not to run a clean reindex.
+
+        Returns:
+            If reindexing was run and was successful.
+        """
+        logger.info("Running reindexing using datahub-upgrade")
+        container = context.charm.unit.get_container(cls.name)
+        environment = cls.compile_environment(context)
+        command = [
+            literals.RUNNER_DEST_PATH,
+            "java",
+            "-jar",
+            "/datahub/datahub-upgrade/bin/datahub-upgrade.jar",
+            "-u",
+            "RestoreIndices",
+        ]
+
+        if clean:
+            command.extend(["-a", "clean"])
+
+        try:
+            container.exec(
+                command,
+                encoding="utf-8",
+                environment=environment,
+                timeout=180,
+            )
+            logger.info("Reindex process started asynchronously.")
+            return True
+        except Exception as e:
+            logger.error("Failed reindexing run for datahub-upgrade: %s", str(e))
+            return False

@@ -132,6 +132,18 @@ config:
       type: boolean
       default: false
 
+actions:
+  reindex:
+    description: Rebuild search and graph indices from metadata store.
+    params:
+      clean:
+        type: boolean
+        description: |
+          This process fetches the latest version of each aspect from the database
+          and rebuilds the search and graph indices. If --clean is set, the existing
+          indices will be deleted before reindexing.
+    additionalProperties: false
+
 # The containers and resources metadata apply to Kubernetes charms only.
 # See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
 
