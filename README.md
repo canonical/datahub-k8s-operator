@@ -128,6 +128,24 @@ juju model-config juju-http-proxy=<http-proxy-address>
 juju model-config juju-https-proxy=<http-proxy-address>
 ```
 
+### Migrating Data
+
+Migrating Datahub data entails the migration of metadata stored in PostgreSQL as well as the migration of indices stored in OpenSearch.
+
+#### Migrating Persistent Storage
+
+Migrating persistent storage can be done via juju actions on the PostgreSQL charm as described [here](https://canonical-charmed-postgresql.readthedocs-hosted.com/14/how-to/back-up-and-restore/).
+
+#### Migrating Indices
+
+Migrating indices can be done via juju actions on the Opensearch charm as described [here](https://charmhub.io/opensearch/docs/h-create-backup).
+
+However, it is often easier and sometimes needed to rebuild search indices as outlined in [Datahub documentation](https://docs.datahub.com/docs/how/restore-indices/). This can be done by running the following command:
+
+```bash
+juju run datahub-k8s/leader reindex
+```
+
 ## Contributing
 This charm is still in active development. Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this charm following best practice guidelines, and [CONTRIBUTING.md](CONTRIBUTING.md) for developer guidance.
 
