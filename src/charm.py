@@ -121,6 +121,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.peer_relation_changed, self._on_peer_relation_changed)
         self.framework.observe(self.on.update_status, self._on_update_status)
+        self.framework.observe(self.on.reindex_action, self._on_reindex_action)
 
         # TODO (mertalpt): Can we make db/topic/index names dynamic to allow
         # the same dependency to be used by multiple DataHub deployments?
@@ -190,6 +191,39 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self._state.gms_truststore_initialized = False
 
         self._update(event)
+
+    @log_event_handler(logger)
+    def _on_reindex_action(self, event):
+        """Run the 'RestoreIndices' command in 'datahub-upgrade' container.
+
+        Args:
+            event: The event triggered when the action is triggered.
+        """
+        if not self.unit.is_leader():
+            event.fail("This action can only be run on the leader unit.")
+            return
+
+        context = services.ServiceContext(self)
+        service = services.UpgradeService
+        if not service.is_ready(context):
+            event.fail("upgrade service is not ready")
+            return
+
+        container = self.unit.get_container(service.name)
+        if not container.can_connect():
+            event.fail("cannot connect to container")
+            return
+        clean_index = event.params.get("clean", False)
+
+        is_success = service.run_reindex(context, clean_index)
+
+        result = {"result": "command failed"}
+        if is_success:
+            result = {
+                "result": "command succeeded",
+                "output": "Observe reindexing progress on 'datahub-gms' container logs.",
+            }
+        event.set_results(result)
 
     @log_event_handler(logger)
     def _on_config_changed(self, event):
