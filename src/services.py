@@ -504,6 +504,7 @@ class GMSService(AbstractService):
         gms_secret_key = encryption_secret.get_content(refresh=True)["gms-key"]
 
         env = {
+            "THEME_V2_DEFAULT": "true",
             "DATAHUB_TELEMETRY_ENABLED": "false",
             "EBEAN_DATASOURCE_PORT": db_conn["port"],
             "SHOW_SEARCH_FILTERS_V2": "true",
@@ -1213,8 +1214,17 @@ class UpgradeService(AbstractService):
         Returns:
             If reindexing was run and was successful.
         """
-        logger.info("Running reindexing using datahub-upgrade")
         container = context.charm.unit.get_container(cls.name)
+
+        logger.info("Pushing runner script for datahub-upgrade")
+        utils.push_file(
+            container,
+            literals.RUNNER_SRC_PATH,
+            literals.RUNNER_DEST_PATH,
+            0o755,
+        )
+
+        logger.info("Running reindexing using datahub-upgrade")
         environment = cls.compile_environment(context)
         command = [
             literals.RUNNER_DEST_PATH,
