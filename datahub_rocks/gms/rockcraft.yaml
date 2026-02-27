@@ -1,0 +1,206 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# Design Decisions (from Q&A):
+# ────────────────────────────────────────────────────────────────────────
+# 1. Version tag: Strictly targets DataHub repository tag v1.4.0.3.
+# 2. Gradle tasks: `:metadata-service:war:build` and `:datahub-upgrade:build`
+#    are run together in a single invocation for cache efficiency.
+# 3. kubectl: Omitted — lifecycle orchestration is handled by the Juju charm.
+# 4. Kafka truststore: Created at build time by copying the JRE cacerts to
+#    /tmp/kafka.client.truststore.jks (matching the upstream Dockerfile).
+# 5. Python 3.11: Built from source for Gradle pre-commit hook compatibility.
+#    Build-only; not primed into the final image.
+# 6. Health check: Included as a Pebble check on http://localhost:8080/health
+#    with on-check-failure: up: ignore (matching the frontend rock pattern).
+# 7. Filesystem layout mirrors upstream Dockerfiles:
+#      /datahub/datahub-gms/          — GMS WAR, start script, configs
+#      /datahub/datahub-upgrade/      — Upgrade JAR, start script, configs
+#      /datahub/postgres-setup/       — PostgreSQL init scripts
+#      /datahub/elasticsearch-setup/  — ES/OS index creation script + indices
+#      /                              — OTel and JMX agent JARs at root
+# 8. Additional runtime packages (postgresql-client, jq) installed via
+#    stage-packages — no suitable snaps exist for bare-base staging.
+# • No dockerize — startup readiness ordering is delegated to the Juju charm.
+# • The Pebble service runs as the non-root _daemon_ user.
+# • All downloaded artifacts are verified with SHA-256 checksums.
+
+name: datahub-gms
+base: bare
+build-base: ubuntu@24.04
+version: '1.4.0.3'
+summary: "DataHub GMS 1.4.0.3 Rock"
+description: "OCI image for the Generalized Metadata Service (GMS) component of DataHub, bundling upgrade, postgres-setup, and elasticsearch-setup scripts."
+platforms:
+  amd64:
+
+run-user: _daemon_
+
+services:
+  gms:
+    override: merge
+    command: "/datahub/datahub-gms/scripts/start.sh"
+    on-check-failure:
+      up: ignore
+    environment:
+      JMX_VERSION: "0.20.0"
+      LD_LIBRARY_PATH: "/lib:/lib64"
+      OTEL_EXPORTER_OTLP_MAX_PAYLOAD_SIZE: "4194304"
+      OTEL_EXPORTER_OTLP_HTTP_HTTP2_MAX_FRAME_SIZE: "8388608"
+      OTEL_EXPORTER_OTLP_HTTP_COMPRESSION: "gzip"
+      OTEL_EXPORTER_OTLP_TRACES_COMPRESSION: "gzip"
+
+checks:
+  up:
+    override: merge
+    threshold: 4
+    http:
+      url: "http://localhost:8080/health"
+
+parts:
+  # Part 1: Build Python 3.11 from source (build-time only).
+  # Required by the Gradle pre-commit hooks. Nothing from this part is
+  # primed — Python is installed system-wide in the build instance and
+  # never written to CRAFT_PART_INSTALL.
+  python-from-source:
+    plugin: nil
+    source: https://www.python.org/ftp/python/3.11.14/Python-3.11.14.tgz
+    source-type: tar
+    source-checksum: sha256/563d2a1b2a5ba5d5409b5ecd05a0e1bf9b028cf3e6a6f0c87a5dc8dc3f2d9182
+    build-packages:
+      - build-essential
+      - libbz2-dev
+      - libffi-dev
+      - libgdbm-dev
+      - libncurses5-dev
+      - libnss3-dev
+      - libreadline-dev
+      - libsqlite3-dev
+      - libssl-dev
+      - zlib1g-dev
+    override-build: |
+      cd "${CRAFT_PART_SRC}"
+      ./configure --enable-optimizations --prefix=/usr/local
+      make -j "$(nproc)"
+      make install
+      update-alternatives --install /usr/local/bin/python python \
+        /usr/local/bin/python3.11 1
+
+  # Part 2: Clone DataHub at v1.4.0.3, Gradle-build the GMS WAR and
+  # Upgrade JAR, then collect all scripts, configs, and init files
+  # required at runtime.
+  datahub-build:
+    plugin: nil
+    after:
+      - python-from-source
+    source: https://github.com/acryldata/datahub.git
+    source-tag: v1.4.0.3
+    source-depth: 1
+    source-type: git
+    build-packages:
+      - openjdk-17-jdk-headless
+      - git
+    build-environment:
+      - PATH: "/usr/local/bin:${PATH}"
+    override-build: |
+      set -eu
+
+      # ── Gradle build ────────────────────────────────────────────────
+      ./gradlew :metadata-service:war:build :datahub-upgrade:build \
+        -x test -x yarnTest -x yarnLint
+
+      # ── GMS artifacts ───────────────────────────────────────────────
+      install -Dm644 metadata-service/war/build/libs/war.war \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/bin/war.war"
+
+      install -Dm755 docker/datahub-gms/start.sh \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/scripts/start.sh"
+
+      install -Dm644 docker/monitoring/client-prometheus-config.yaml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/scripts/prometheus-config.yaml"
+
+      install -Dm644 metadata-models/src/main/resources/entity-registry.yml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/resources/entity-registry.yml"
+
+      # Directory expected by GMS at runtime
+      mkdir -p "${CRAFT_PART_INSTALL}/etc/datahub/plugins/auth/resources"
+
+      # ── Upgrade artifacts ───────────────────────────────────────────
+      install -Dm644 datahub-upgrade/build/libs/datahub-upgrade.jar \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-upgrade/bin/datahub-upgrade.jar"
+
+      install -Dm755 docker/datahub-upgrade/start.sh \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-upgrade/scripts/start.sh"
+
+      install -Dm644 docker/monitoring/client-prometheus-config.yaml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-upgrade/scripts/prometheus-config.yaml"
+
+      # Entity registry is also referenced by the upgrade container
+      install -Dm644 metadata-models/src/main/resources/entity-registry.yml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/resources/entity-registry.yml"
+
+      # ── PostgreSQL setup artifacts ──────────────────────────────────
+      install -Dm755 docker/postgres-setup/init.sh \
+        "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init.sh"
+      install -Dm644 docker/postgres-setup/init.sql \
+        "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init.sql"
+      install -Dm644 docker/postgres-setup/init-cdc.sql \
+        "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init-cdc.sql"
+
+      # ── Elasticsearch/OpenSearch setup artifacts ────────────────────
+      install -Dm755 docker/elasticsearch-setup/create-indices.sh \
+        "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/create-indices.sh"
+      mkdir -p "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/index"
+      cp -r metadata-service/restli-servlet-impl/src/main/resources/index/* \
+        "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/index/"
+
+      # ── Kafka truststore ────────────────────────────────────────────
+      # Copy the JRE cacerts as the default Kafka client truststore,
+      # matching the upstream Dockerfile convention.
+      CACERTS="/usr/lib/jvm/java-17-openjdk-amd64/lib/security/cacerts"
+      install -Dm644 "${CACERTS}" \
+        "${CRAFT_PART_INSTALL}/tmp/kafka.client.truststore.jks"
+
+  # Part 3: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  opentelemetry-agent:
+    plugin: dump
+    source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
+    source-type: file
+    source-checksum: sha256/7ecffb5fdda5d2e0fd0125abaffa218146a23dc2402d5c7b30cf5a2f2c3ff241
+    organize:
+      opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
+
+  # Part 4: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  jmx-prometheus-agent:
+    plugin: dump
+    source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
+    source-type: file
+    source-checksum: sha256/8b67ed40485d475648c36d11d21464b484406f85faf912b3363f71a6a7861320
+    organize:
+      jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
+
+  # Part 5: Runtime dependencies for the bare-base image.
+  # Provides the JRE, C library, and CLI tools required at runtime.
+  # postgresql-client is needed by postgres-setup/init.sh (psql).
+  # jq is needed by elasticsearch-setup/create-indices.sh.
+  runtime-packages:
+    plugin: nil
+    stage-packages:
+      - base-files
+      - bash
+      - coreutils
+      - ca-certificates
+      - curl
+      - libc6
+      - libsnappy1v5
+      - libsqlite3-0
+      - openjdk-17-jre-headless
+      - postgresql-client
+      - jq
+    prime:
+      - -usr/share/doc
+      - -usr/share/man
+      - -usr/share/lintian
+      - -usr/share/bug
+      - -usr/share/info
+      - -usr/lib/jvm/java-17-openjdk-amd64/lib/src.zip

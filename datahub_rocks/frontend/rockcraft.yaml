@@ -33,7 +33,7 @@ checks:
     override: merge
     threshold: 4
     http:
-      url: "localhost:9002/admin"
+      url: "http://localhost:9002/admin"
 
 parts:
   # Part 1: Build Python 3.11 from source (build-time only).
