@@ -64,7 +64,7 @@ help:
 	@echo "  clean                Remove built charm and rock files"
 	@echo "  clean-charmcraft     Clean charmcraft environment"
 	@echo "  clean-rockcraft      Clean all rockcraft environments"
-	@echo "  deploy-local         Deploy charm with local resources"
+	@echo "  deploy-local         Deploy charm with local resources (requires SECRET_ID=<id>)"
 	@echo "  fmt                  Apply coding style standards to code"
 	@echo "  import-rock          Build and import all rocks into MicroK8s"
 	@echo "  import-rock-actions  Build and import the actions rock into MicroK8s"
@@ -190,11 +190,15 @@ import-rock: import-rock-actions import-rock-frontend import-rock-gms
 
 .PHONY: deploy-local
 deploy-local:
+ifndef SECRET_ID
+	$(error SECRET_ID is required. Usage: make deploy-local SECRET_ID=<secret-id>)
+endif
 	@echo "Deploying charm with local resources..."
 	juju deploy $(CHARM_FILE) \
 		--resource datahub-actions=$(REGISTRY)/$(ACTIONS_NAME):latest \
 		--resource datahub-frontend=$(REGISTRY)/$(FRONTEND_NAME):latest \
-		--resource datahub-gms=$(REGISTRY)/$(GMS_NAME):latest
+		--resource datahub-gms=$(REGISTRY)/$(GMS_NAME):latest \
+		--config encryption-keys-secret-id=$(SECRET_ID)
 
 # --- Clean ---
 
