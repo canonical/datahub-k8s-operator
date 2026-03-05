@@ -18,3 +18,10 @@ TRUSTSTORE_INIT_SCRIPT_DEST_PATH = "/charm-external/init-truststore.sh"
 OPENSEARCH_CERTIFICATES_PATH = "/charm-external/opensearch_certificates.pem"
 OPENSEARCH_ROOT_CA_CERT_PATH = "/charm-external/opensearch_root_ca_cert.pem"
 OPENSEARCH_ROOT_CA_CERT_ALIAS = "opensearch-root-ca"
+
+# Paths inside the GMS rock for setup scripts.
+POSTGRES_SETUP_SCRIPT = "/datahub/postgres-setup/init.sh"
+POSTGRES_SETUP_WORKDIR = "/datahub/postgres-setup"
+OPENSEARCH_SETUP_SCRIPT = "/datahub/elasticsearch-setup/create-indices.sh"
+OPENSEARCH_SETUP_WORKDIR = "/datahub/elasticsearch-setup"
+UPGRADE_JAR_PATH = "/datahub/datahub-upgrade/bin/datahub-upgrade.jar"
