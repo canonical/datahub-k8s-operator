@@ -1,42 +1,12 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-# Design Decisions (from Q&A rounds 1–3):
-# ────────────────────────────────────────────────────────────────────────
-# • base: bare / build-base: ubuntu@24.04 — matches the frontend rock for
-#   minimal attack surface and image size.
-# • No Gradle — datahub-actions is a pure Python project.  The image is built
-#   by installing packages with uv/pip from the cloned DataHub source tree
-#   checked out at tag v1.4.0 (non-editable installs).
-# • Python 3.11 — built from source (matching the upstream Dockerfile and the
-#   frontend rock).  The build-from-source part is shared with the frontend.
-# • metadata-ingestion (acryl-datahub) is a hard runtime dependency of
-#   datahub-actions and is installed with extras
-#   [base,s3-slim,gcs-slim,abs-slim], matching the upstream slim Dockerfile.
-# • datahub-actions is installed with all plugin extras except
-#   snowflake_tag_propagation (depends on spacy/blis; known build issues on
-#   some architectures).
-# • uv is included in the runtime image (copied from the astral-uv build snap)
-#   so that operators can dynamically install additional Python packages.
-# • No dockerize — startup readiness ordering is delegated to the Juju charm.
-# • No health check — delegated to the Juju charm.
-# • Bundled ingestion venvs are pre-built for: s3, postgres, kafka, trino,
-#   hive, dbt, superset, elasticsearch.  The elasticsearch plugin uses the
-#   ES 7.x Python client and is API-compatible with OpenSearch.  Each bundled
-#   venv is fully isolated, which increases image size but matches the
-#   upstream architecture.
-# • The Pebble service invokes /start_datahub_actions.sh, which reads YAML
-#   config files from /etc/datahub/actions/system/conf/ and launches the
-#   datahub-actions CLI.
-# • The default executor.yaml action config is baked into the image.
-# • Version is pinned to 1.4.0 via source-tag; version_updater.py patches
-#   the Python package version strings at build time.
-# • The service runs as the non-root _daemon_ user.
-
 name: datahub-actions
 base: bare
 build-base: ubuntu@24.04
-version: '1.4.0'
+# DataHub versioning can go 4 levels deep.
+# We keep documentation to 3 levels, rest to 4 levels.
+version: '1.4.0.5'
 summary: "DataHub Actions 1.4.0 Rock"
 description: "OCI image for the Actions component of DataHub."
 platforms:
@@ -94,7 +64,7 @@ parts:
     after:
       - python-from-source
     source: https://github.com/acryldata/datahub.git
-    source-tag: v1.4.0
+    source-tag: v1.4.0.5
     source-depth: 1
     source-type: git
     build-snaps:
@@ -113,10 +83,11 @@ parts:
       - libssl-dev
     build-environment:
       - PATH: "/usr/local/bin:${PATH}"
+      - UV_BUILD_CONSTRAINT: "${CRAFT_PART_SRC}/metadata-ingestion/build-constraints.txt"
     override-build: |
       set -eu
 
-      RELEASE_VERSION="1.4.0"
+      RELEASE_VERSION="1.4.0.5"
 
       # Patch version strings so installed packages report 1.4.0
       python3.11 python-build/version_updater.py \

@@ -4,7 +4,9 @@
 name: datahub-frontend
 base: bare
 build-base: ubuntu@24.04
-version: '1.4.0'
+# DataHub versioning can go 4 levels deep.
+# We keep documentation to 3 levels, rest to 4 levels.
+version: '1.4.0.5'
 summary: "DataHub Actions 1.4.0 Rock"
 description: "OCI image for the Frontend component of DataHub."
 platforms:
@@ -73,7 +75,7 @@ parts:
     after:
       - python-from-source
     source: https://github.com/acryldata/datahub.git
-    source-tag: v1.4.0
+    source-tag: v1.4.0.5
     source-depth: 1
     source-type: git
     build-packages:

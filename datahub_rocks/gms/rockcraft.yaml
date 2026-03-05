@@ -1,35 +1,13 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-# Design Decisions (from Q&A):
-# ────────────────────────────────────────────────────────────────────────
-# 1. Version tag: Strictly targets DataHub repository tag v1.4.0.3.
-# 2. Gradle tasks: `:metadata-service:war:build` and `:datahub-upgrade:build`
-#    are run together in a single invocation for cache efficiency.
-# 3. kubectl: Omitted — lifecycle orchestration is handled by the Juju charm.
-# 4. Kafka truststore: Created at build time by copying the JRE cacerts to
-#    /tmp/kafka.client.truststore.jks (matching the upstream Dockerfile).
-# 5. Python 3.11: Built from source for Gradle pre-commit hook compatibility.
-#    Build-only; not primed into the final image.
-# 6. Health check: Included as a Pebble check on http://localhost:8080/health
-#    with on-check-failure: up: ignore (matching the frontend rock pattern).
-# 7. Filesystem layout mirrors upstream Dockerfiles:
-#      /datahub/datahub-gms/          — GMS WAR, start script, configs
-#      /datahub/datahub-upgrade/      — Upgrade JAR, start script, configs
-#      /datahub/postgres-setup/       — PostgreSQL init scripts
-#      /datahub/elasticsearch-setup/  — ES/OS index creation script + indices
-#      /                              — OTel and JMX agent JARs at root
-# 8. Additional runtime packages (postgresql-client, jq) installed via
-#    stage-packages — no suitable snaps exist for bare-base staging.
-# • No dockerize — startup readiness ordering is delegated to the Juju charm.
-# • The Pebble service runs as the non-root _daemon_ user.
-# • All downloaded artifacts are verified with SHA-256 checksums.
-
 name: datahub-gms
 base: bare
 build-base: ubuntu@24.04
-version: '1.4.0.3'
-summary: "DataHub GMS 1.4.0.3 Rock"
+# DataHub versioning can go 4 levels deep.
+# We keep documentation to 3 levels, rest to 4 levels.
+version: '1.4.0.5'
+summary: "DataHub GMS 1.4.0 Rock"
 description: "OCI image for the Generalized Metadata Service (GMS) component of DataHub, bundling upgrade, postgres-setup, and elasticsearch-setup scripts."
 platforms:
   amd64:
@@ -86,7 +64,7 @@ parts:
       update-alternatives --install /usr/local/bin/python python \
         /usr/local/bin/python3.11 1
 
-  # Part 2: Clone DataHub at v1.4.0.3, Gradle-build the GMS WAR and
+  # Part 2: Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
   # Upgrade JAR, then collect all scripts, configs, and init files
   # required at runtime.
   datahub-build:
@@ -94,7 +72,7 @@ parts:
     after:
       - python-from-source
     source: https://github.com/acryldata/datahub.git
-    source-tag: v1.4.0.3
+    source-tag: v1.4.0.5
     source-depth: 1
     source-type: git
     build-packages:
