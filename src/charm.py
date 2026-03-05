@@ -34,10 +34,6 @@ logger = logging.getLogger(__name__)
 
 # Ordering of services has the function of setting the initialization priority.
 SERVICES: List[Type[services.AbstractService]] = [
-    services.PostgresqlSetupService,
-    services.KafkaSetupService,
-    services.OpensearchSetupService,
-    services.UpgradeService,
     services.GMSService,
     services.FrontendService,
     services.ActionsService,
@@ -204,9 +200,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return
 
         context = services.ServiceContext(self)
-        service = services.UpgradeService
+        service = services.GMSService
         if not service.is_ready(context):
-            event.fail("upgrade service is not ready")
+            event.fail("GMS service is not ready")
             return
 
         container = self.unit.get_container(service.name)
