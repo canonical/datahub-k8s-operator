@@ -21,10 +21,8 @@ description: |
   It is useful for keeping track of schema, ownership and dependency information in data
   warehouses and pipelines.
 
-
 assumes:
   - juju >= 3.3
-
 
 bases:
   - build-on:
@@ -38,7 +36,6 @@ bases:
       architectures:
       - amd64
 
-
 charm-libs:
   - lib: data_platform_libs.data_interfaces
     version: "0"
@@ -47,15 +44,18 @@ charm-libs:
   - lib: nginx_ingress_integrator.nginx_route
     version: "0"
 
-
 parts:
   charm:
     charm-binary-python-packages:
       - pydantic
       - pydantic-core
     build-packages:
-      - rustc
-      - cargo
+      - pkg-config
+      - libffi-dev
+      - libssl-dev
+      # Pin to prevent pulling incompatible `maturin` version
+      - "rustc-1.85"
+      - "cargo-1.85"
 
 peers:
   peer:
@@ -82,11 +82,6 @@ requires:
     interface: nginx-route
     limit: 1
 
-# (Optional) Configuration options for the charm
-# This config section defines charm config options, and populates the Configure
-# tab on Charmhub.
-# More information on this section at https://juju.is/docs/sdk/charmcraft-yaml#heading--config
-# General configuration documentation: https://juju.is/docs/sdk/config
 config:
   options:
     encryption-keys-secret-id:
@@ -145,10 +140,6 @@ actions:
           indices will be deleted before reindexing.
     additionalProperties: false
 
-# The containers and resources metadata apply to Kubernetes charms only.
-# See https://juju.is/docs/sdk/metadata-reference for a checklist and guidance.
-
-# Your workload’s containers.
 containers:
   datahub-actions:
     resource: datahub-actions
@@ -157,8 +148,6 @@ containers:
   datahub-gms:
     resource: datahub-gms
 
-
-# This field populates the Resources tab on Charmhub.
 resources:
   datahub-actions:
     type: oci-image

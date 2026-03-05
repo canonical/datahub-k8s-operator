@@ -3,7 +3,7 @@
 
 name: datahub-gms
 base: bare
-build-base: ubuntu@24.04
+build-base: ubuntu@22.04
 # DataHub versioning can go 4 levels deep.
 # We keep documentation to 3 levels, rest to 4 levels.
 version: '1.4.0.5'
@@ -36,41 +36,11 @@ checks:
       url: "http://localhost:8080/health"
 
 parts:
-  # Part 1: Build Python 3.11 from source (build-time only).
-  # Required by the Gradle pre-commit hooks. Nothing from this part is
-  # primed — Python is installed system-wide in the build instance and
-  # never written to CRAFT_PART_INSTALL.
-  python-from-source:
-    plugin: nil
-    source: https://www.python.org/ftp/python/3.11.14/Python-3.11.14.tgz
-    source-type: tar
-    source-checksum: sha256/563d2a1b2a5ba5d5409b5ecd05a0e1bf9b028cf3e6a6f0c87a5dc8dc3f2d9182
-    build-packages:
-      - build-essential
-      - libbz2-dev
-      - libffi-dev
-      - libgdbm-dev
-      - libncurses5-dev
-      - libnss3-dev
-      - libreadline-dev
-      - libsqlite3-dev
-      - libssl-dev
-      - zlib1g-dev
-    override-build: |
-      cd "${CRAFT_PART_SRC}"
-      ./configure --enable-optimizations --prefix=/usr/local
-      make -j "$(nproc)"
-      make install
-      update-alternatives --install /usr/local/bin/python python \
-        /usr/local/bin/python3.11 1
-
-  # Part 2: Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
+  # Part 1: Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
   # Upgrade JAR, then collect all scripts, configs, and init files
   # required at runtime.
   datahub-build:
     plugin: nil
-    after:
-      - python-from-source
     source: https://github.com/acryldata/datahub.git
     source-tag: v1.4.0.5
     source-depth: 1
@@ -78,8 +48,9 @@ parts:
     build-packages:
       - openjdk-17-jdk-headless
       - git
-    build-environment:
-      - PATH: "/usr/local/bin:${PATH}"
+      - python3.11
+      - python3.11-dev
+      - python3.11-venv
     override-build: |
       set -eu
 
@@ -139,7 +110,7 @@ parts:
       install -Dm644 "${CACERTS}" \
         "${CRAFT_PART_INSTALL}/tmp/kafka.client.truststore.jks"
 
-  # Part 3: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  # Part 2: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
   opentelemetry-agent:
     plugin: dump
     source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
@@ -148,7 +119,7 @@ parts:
     organize:
       opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
 
-  # Part 4: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  # Part 3: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
   jmx-prometheus-agent:
     plugin: dump
     source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
@@ -157,7 +128,7 @@ parts:
     organize:
       jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
 
-  # Part 5: Runtime dependencies for the bare-base image.
+  # Part 4: Runtime dependencies for the bare-base image.
   # Provides the JRE, C library, and CLI tools required at runtime.
   # postgresql-client is needed by postgres-setup/init.sh (psql).
   # jq is needed by elasticsearch-setup/create-indices.sh.

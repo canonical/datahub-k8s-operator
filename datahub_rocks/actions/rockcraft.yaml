@@ -3,7 +3,7 @@
 
 name: datahub-actions
 base: bare
-build-base: ubuntu@24.04
+build-base: ubuntu@22.04
 # DataHub versioning can go 4 levels deep.
 # We keep documentation to 3 levels, rest to 4 levels.
 version: '1.4.0.5'
@@ -28,41 +28,11 @@ services:
       DATAHUB_BUNDLED_VENV_PATH: "/opt/datahub/venvs"
 
 parts:
-  # Part 1: Build Python 3.11 from source (build-time only).
-  # Required by the uv/pip toolchain.  Nothing from this part is primed —
-  # Python is installed system-wide in the build instance and never
-  # written to CRAFT_PART_INSTALL.
-  python-from-source:
-    plugin: nil
-    source: https://www.python.org/ftp/python/3.11.14/Python-3.11.14.tgz
-    source-type: tar
-    source-checksum: sha256/563d2a1b2a5ba5d5409b5ecd05a0e1bf9b028cf3e6a6f0c87a5dc8dc3f2d9182
-    build-packages:
-      - build-essential
-      - libbz2-dev
-      - libffi-dev
-      - libgdbm-dev
-      - libncurses5-dev
-      - libnss3-dev
-      - libreadline-dev
-      - libsqlite3-dev
-      - libssl-dev
-      - zlib1g-dev
-    override-build: |
-      cd "${CRAFT_PART_SRC}"
-      ./configure --enable-optimizations --prefix=/usr/local
-      make -j "$(nproc)"
-      make install
-      update-alternatives --install /usr/local/bin/python python \
-        /usr/local/bin/python3.11 1
-
-  # Part 2: Clone DataHub v1.4.0, build the primary virtualenv with
+  # Part 1: Clone DataHub v1.4.0, build the primary virtualenv with
   # datahub-actions + metadata-ingestion, create bundled ingestion venvs
   # for the selected plugins, and stage scripts + config.
   datahub-actions-build:
     plugin: nil
-    after:
-      - python-from-source
     source: https://github.com/acryldata/datahub.git
     source-tag: v1.4.0.5
     source-depth: 1
@@ -81,8 +51,10 @@ parts:
       - unixodbc-dev
       - libffi-dev
       - libssl-dev
+      - python3.11
+      - python3.11-dev
+      - python3.11-venv
     build-environment:
-      - PATH: "/usr/local/bin:${PATH}"
       - UV_BUILD_CONSTRAINT: "${CRAFT_PART_SRC}/metadata-ingestion/build-constraints.txt"
     override-build: |
       set -eu
@@ -156,10 +128,10 @@ parts:
       install -m 755 /snap/astral-uv/current/bin/uvx \
         "${CRAFT_PART_INSTALL}/usr/bin/uvx"
 
-  # Part 3: Runtime dependencies for the bare-base image.
+  # Part 2: Runtime dependencies for the bare-base image.
   # Provides the C library and shared libraries required by native Python
   # extension modules at runtime.  Python 3.11 itself is delivered by the
-  # primary venv (built from source in part 1 and bundled in part 2).
+  # primary venv (bundled in part 1).
   runtime-packages:
     plugin: nil
     stage-packages:
