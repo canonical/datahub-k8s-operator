@@ -3,7 +3,7 @@
 
 name: datahub-frontend
 base: bare
-build-base: ubuntu@24.04
+build-base: ubuntu@22.04
 # DataHub versioning can go 4 levels deep.
 # We keep documentation to 3 levels, rest to 4 levels.
 version: '1.4.0.5'
@@ -38,42 +38,12 @@ checks:
       url: "http://localhost:9002/admin"
 
 parts:
-  # Part 1: Build Python 3.11 from source (build-time only).
-  # Required by the Gradle/node-gyp toolchain. Nothing from this part
-  # is primed — Python is installed system-wide in the build instance
-  # and never written to CRAFT_PART_INSTALL.
-  python-from-source:
-    plugin: nil
-    source: https://www.python.org/ftp/python/3.11.14/Python-3.11.14.tgz
-    source-type: tar
-    source-checksum: sha256/563d2a1b2a5ba5d5409b5ecd05a0e1bf9b028cf3e6a6f0c87a5dc8dc3f2d9182
-    build-packages:
-      - build-essential
-      - libbz2-dev
-      - libffi-dev
-      - libgdbm-dev
-      - libncurses5-dev
-      - libnss3-dev
-      - libreadline-dev
-      - libsqlite3-dev
-      - libssl-dev
-      - zlib1g-dev
-    override-build: |
-      cd "${CRAFT_PART_SRC}"
-      ./configure --enable-optimizations --prefix=/usr/local
-      make -j "$(nproc)"
-      make install
-      update-alternatives --install /usr/local/bin/python python \
-        /usr/local/bin/python3.11 1
-
-  # Part 2: Clone DataHub at v1.4.0 and build the frontend distribution.
+  # Part 1: Clone DataHub at v1.4.0 and build the frontend distribution.
   # Only the four artifact groups required at runtime are copied into
   # CRAFT_PART_INSTALL; the Gradle cache, source tree, and JDK are
   # excluded from the final image automatically.
   datahub-frontend-build:
     plugin: nil
-    after:
-      - python-from-source
     source: https://github.com/acryldata/datahub.git
     source-tag: v1.4.0.5
     source-depth: 1
@@ -81,8 +51,9 @@ parts:
     build-packages:
       - openjdk-17-jdk-headless
       - git
-    build-environment:
-      - PATH: "/usr/local/bin:${PATH}"
+      - python3.11
+      - python3.11-dev
+      - python3.11-venv
     override-build: |
       ./gradlew :datahub-frontend:dist -x yarnTest -x yarnLint
 
@@ -104,7 +75,7 @@ parts:
         "${CRAFT_PART_INSTALL}/start.sh"
       chmod 755 "${CRAFT_PART_INSTALL}/start.sh"
 
-  # Part 3a: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  # Part 2a: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
   opentelemetry-agent:
     plugin: dump
     source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
@@ -113,7 +84,7 @@ parts:
     organize:
       opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
 
-  # Part 3b: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  # Part 2b: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
   jmx-prometheus-agent:
     plugin: dump
     source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
@@ -122,7 +93,7 @@ parts:
     organize:
       jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
 
-  # Part 4: Runtime dependencies for the bare-base image.
+  # Part 3: Runtime dependencies for the bare-base image.
   # apt resolves the full transitive closure; prime exclusions strip
   # documentation and JDK source to minimise final image size.
   runtime-packages:
