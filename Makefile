@@ -16,6 +16,7 @@ REGISTRY := localhost:32000
 
 # Ensure yq is installed: 'sudo snap install yq'
 CHARM_NAME := $(shell yq '.name' $(CHARMCRAFT_YAML))
+CHARM_BASE := $(shell yq '.bases[0].run-on[0].name' $(CHARMCRAFT_YAML))-$(shell yq '.bases[0].run-on[0].channel' $(CHARMCRAFT_YAML))
 CHARM_ARCH := amd64
 
 # --- Rock directories ---
@@ -40,7 +41,7 @@ GMS_VERSION := $(shell yq '.version' $(GMS_ROCKCRAFT_YAML))
 GMS_ROCK := $(GMS_DIR)/$(GMS_NAME)_$(GMS_VERSION)_$(CHARM_ARCH).rock
 
 # The expected output file from charmcraft pack
-CHARM_FILE := $(PROJECT_ROOT)/$(CHARM_NAME)_$(CHARM_ARCH).charm
+CHARM_FILE := $(PROJECT_ROOT)/$(CHARM_NAME)_$(CHARM_BASE)-$(CHARM_ARCH).charm
 
 # Default target
 .PHONY: all
@@ -64,6 +65,7 @@ help:
 	@echo "  clean                Remove built charm and rock files"
 	@echo "  clean-charmcraft     Clean charmcraft environment"
 	@echo "  clean-rockcraft      Clean all rockcraft environments"
+	@echo "  create-secret        Create a Juju secret with random encryption keys"
 	@echo "  deploy-local         Deploy charm with local resources (requires SECRET_ID=<id>)"
 	@echo "  fmt                  Apply coding style standards to code"
 	@echo "  import-rock          Build and import all rocks into MicroK8s"
@@ -187,6 +189,20 @@ import-rock-gms: $(GMS_ROCK)
 import-rock: import-rock-actions import-rock-frontend import-rock-gms
 
 # --- Deploy ---
+
+SECRET_NAME ?= datahub-encryption-keys
+
+.PHONY: create-secret
+create-secret:
+	@GMS_KEY=$$(openssl rand -base64 32) && \
+	FE_KEY=$$(openssl rand -base64 32) && \
+	SECRET_FILE=$$(mktemp -p "$$HOME" datahub-secret.XXXXXX.yaml) && \
+	echo "gms-key: $$GMS_KEY" > "$$SECRET_FILE" && \
+	echo "frontend-key: $$FE_KEY" >> "$$SECRET_FILE" && \
+	SECRET_ID=$$(juju add-secret $(SECRET_NAME) --file="$$SECRET_FILE") && \
+	rm -f "$$SECRET_FILE" && \
+	echo "Secret created: $$SECRET_ID" && \
+	echo "Grant it after deploy with: juju grant-secret $(SECRET_NAME) $(CHARM_NAME)"
 
 .PHONY: deploy-local
 deploy-local:

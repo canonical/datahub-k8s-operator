@@ -234,25 +234,21 @@ juju switch lxd:datahub-vm
 # the indexes created by DataHub
 juju deploy opensearch --channel 2/edge -n 2
 juju deploy self-signed-certificates
-juju deploy postgresql --channel 14/stable
-juju deploy kafka --channel 3/edge
-juju deploy zookeeper
 juju integrate opensearch self-signed-certificates
-juju integrate kafka zookeeper
 juju offer opensearch:opensearch-client os-client
-juju offer postgresql:database pg-client
-juju offer kafka:kafka-client kafka-client
 ```
 
-Consuming offers:
+Consuming offers and deploying other dependencies:
 ```shell
 juju switch microk8s:datahub-k8s
 juju consume lxd:admin/datahub-vm.os-client os-client
-juju consume lxd:admin/datahub-vm.pg-client pg-client
-juju consume lxd:admin/datahub-vm.kafka-client kafka-client
+juju deploy postgresql-k8s --channel 14/edge
+juju deploy kafka-k8s --channel 3/edge
+juju deploy zookeeper-k8s --channel 3/edge
+juju integrate kafka-k8s zookeeper-k8s
 ```
 
-**Note:** In theory, DataHub can work with both VM and K8s versions of Kafka and PostgreSQL charms.
+**Note:** DataHub should work with both VM and K8s versions of Kafka and PostgreSQL charms.
 
 ### Deploy the charm
 
@@ -267,15 +263,19 @@ Then, create a secret for encryption keys and deploy:
 ```shell
 juju switch microk8s:datahub-k8s
 
-# Create a secret for encryption keys
-echo -e "gms-key: $GMS_SECRET\nfrontend-key: $FE_SECRET" > /path/to/secret.yaml
-juju add-secret <secret-name> --file=/path/to/secret.yaml  # copy the ID from the output
+# Create a Juju secret with random encryption keys
+make create-secret  # copy the secret ID from the output
 
 # Deploy with local resources (pass the secret ID from the previous step)
 make deploy-local SECRET_ID=<secret-id>
 
 # Grant secret
-juju grant-secret <secret-name> datahub-k8s
+juju grant-secret datahub-encryption-keys datahub-k8s
+```
+
+You can also customise the secret name:
+```shell
+make create-secret SECRET_NAME=my-custom-name
 ```
 
 **Note:** The configuration variables need to be set at deployment time and they should not be changed afterwards. DataHub expects these secrets to be secure, so ensure you have a secret with sufficient entropy. Future updates will make QoL changes here to make this easier to manage.

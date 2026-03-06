@@ -128,7 +128,19 @@ parts:
       install -m 755 /snap/astral-uv/current/bin/uvx \
         "${CRAFT_PART_INSTALL}/usr/bin/uvx"
 
-  # Part 2: Runtime dependencies for the bare-base image.
+  # Part 2: Charm-managed executor config baked into the image.
+  # Overwrites the upstream executor.yaml with a Juju-compatible version.
+  charm-executor-config:
+    plugin: dump
+    source: .
+    after:
+      - datahub-actions-build
+    organize:
+      executor.yaml: etc/datahub/actions/system/conf/executor.yaml
+    prime:
+      - etc/datahub/actions/system/conf/executor.yaml
+
+  # Part 3: Runtime dependencies for the bare-base image.
   # Provides the C library and shared libraries required by native Python
   # extension modules at runtime.  Python 3.11 itself is delivered by the
   # primary venv (bundled in part 1).

@@ -161,14 +161,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: Event instance being handled.
         """
-        # Actions service requires a file to be altered at startup.
-        if event.workload.name == services.ActionsService.name:
-            utils.push_file(
-                event.workload,
-                ("src", "files", "executor.yaml"),
-                "/etc/datahub/actions/system/conf/executor.yaml",
-                0o644,
-            )
         # Frontend service requires a file to be present at startup.
         if event.workload.name == services.FrontendService.name:
             self._state.frontend_truststore_initialized = False

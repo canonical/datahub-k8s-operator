@@ -411,15 +411,9 @@ class FrontendService(AbstractService):
         container = context.charm.unit.get_container(cls.name)
 
         try:
-            utils.push_file(
-                container,
-                literals.TRUSTSTORE_INIT_SCRIPT_SRC_PATH,
-                literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH,
-                0o755,
-            )
             utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
-                [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
+                [literals.TRUSTSTORE_INIT_SCRIPT_PATH],
                 environment={
                     "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
                     "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
@@ -644,16 +638,10 @@ class GMSService(AbstractService):
             "DATAHUB_DB_NAME": db_conn["dbname"],
         }
 
-        utils.push_file(
-            container,
-            literals.RUNNER_SRC_PATH,
-            literals.RUNNER_DEST_PATH,
-            0o744,
-        )
         try:
             logger.info("Running the initialization script for db")
             process = container.exec(
-                command=[literals.RUNNER_DEST_PATH, literals.POSTGRES_SETUP_SCRIPT],
+                command=[literals.RUNNER_PATH, literals.POSTGRES_SETUP_SCRIPT],
                 working_dir=literals.POSTGRES_SETUP_WORKDIR,
                 timeout=600,
                 environment=environment,
@@ -705,18 +693,11 @@ class GMSService(AbstractService):
         # curl use the required certificates.
         environment["CURL_CA_BUNDLE"] = literals.OPENSEARCH_CERTIFICATES_PATH
         certificates = context.charm._state.opensearch_connection["tls-ca"]
-        logger.info("Pushing initialization script for Opensearch")
-        utils.push_file(
-            container,
-            literals.RUNNER_SRC_PATH,
-            literals.RUNNER_DEST_PATH,
-            0o755,
-        )
         utils.push_contents_to_file(container, certificates, literals.OPENSEARCH_CERTIFICATES_PATH, 0o644)
         try:
             logger.info("Running the initialization script for Opensearch")
             process = container.exec(
-                command=[literals.RUNNER_DEST_PATH, literals.OPENSEARCH_SETUP_SCRIPT],
+                command=[literals.RUNNER_PATH, literals.OPENSEARCH_SETUP_SCRIPT],
                 working_dir=literals.OPENSEARCH_SETUP_WORKDIR,
                 timeout=600,
                 environment=environment,
@@ -751,15 +732,9 @@ class GMSService(AbstractService):
         root_ca_cert = utils.split_certificates(certificates)[1]
 
         try:
-            utils.push_file(
-                container,
-                literals.TRUSTSTORE_INIT_SCRIPT_SRC_PATH,
-                literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH,
-                0o755,
-            )
             utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
-                [literals.TRUSTSTORE_INIT_SCRIPT_DEST_PATH],
+                [literals.TRUSTSTORE_INIT_SCRIPT_PATH],
                 environment={
                     "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
                     "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
@@ -790,20 +765,12 @@ class GMSService(AbstractService):
             logger.debug("Already ran datahub-upgrade, skipping")
             return
 
-        logger.info("Pushing runner script for datahub-upgrade")
-        utils.push_file(
-            container,
-            literals.RUNNER_SRC_PATH,
-            literals.RUNNER_DEST_PATH,
-            0o755,
-        )
-
         logger.info("Running datahub-upgrade job")
         environment = cls._compile_upgrade_environment(context)
         try:
             process = container.exec(
                 [
-                    literals.RUNNER_DEST_PATH,
+                    literals.RUNNER_PATH,
                     "java",
                     "-jar",
                     literals.UPGRADE_JAR_PATH,
@@ -900,18 +867,10 @@ class GMSService(AbstractService):
         """
         container = context.charm.unit.get_container(cls.name)
 
-        logger.info("Pushing runner script for reindexing")
-        utils.push_file(
-            container,
-            literals.RUNNER_SRC_PATH,
-            literals.RUNNER_DEST_PATH,
-            0o755,
-        )
-
         logger.info("Running reindexing using datahub-upgrade")
         environment = cls._compile_upgrade_environment(context)
         command = [
-            literals.RUNNER_DEST_PATH,
+            literals.RUNNER_PATH,
             "java",
             "-jar",
             literals.UPGRADE_JAR_PATH,
