@@ -38,6 +38,15 @@ checks:
       url: "http://localhost:9002/admin"
 
 parts:
+  # ---- Metadata ----  
+  rock-source:
+    plugin: dump
+    source: .
+    organize:
+      rockcraft.yaml: rockcraft.yaml
+    stage:
+      - rockcraft.yaml
+      
   # Part 1: Clone DataHub at v1.4.0 and build the frontend distribution.
   # Only the four artifact groups required at runtime are copied into
   # CRAFT_PART_INSTALL; the Gradle cache, source tree, and JDK are

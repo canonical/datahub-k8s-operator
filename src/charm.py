@@ -9,6 +9,7 @@ import secrets
 from typing import Dict, List, Type, Union
 
 import ops
+import yaml
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
     KafkaRequires,
@@ -16,7 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
 from charms.nginx_ingress_integrator.v0.nginx_route import require_nginx_route
-from ops.pebble import CheckStatus
+from ops.pebble import CheckStatus, ModelError, PathError
 
 import exceptions
 import literals
@@ -177,6 +178,19 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             )
         if event.workload.name == services.GMSService.name:
             self._state.gms_truststore_initialized = False
+            try:
+                container = self.unit.get_container(services.GMSService.name)
+                if not container.can_connect():
+                    raise ValueError(f"Cannot connect to {services.GMSService.name}")
+                meta_file = container.pull("/rockcraft.yaml")
+                meta = yaml.safe_load(meta_file)
+                if meta and "version" in meta:
+                    self.unit.set_workload_version(meta["version"])
+                else:
+                    raise ValueError("Cannot find 'version' in 'rockcraft.yaml'.")
+            except (ModelError, PathError, ValueError, yaml.YAMLError) as e:
+                logger.info("Could not get workload version: %s", str(e))
+                event.defer()
 
         self._update(event)
 
