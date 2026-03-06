@@ -28,6 +28,15 @@ services:
       DATAHUB_BUNDLED_VENV_PATH: "/opt/datahub/venvs"
 
 parts:
+  # ---- Metadata ----  
+  rock-source:
+    plugin: dump
+    source: .
+    organize:
+      rockcraft.yaml: rockcraft.yaml
+    stage:
+      - rockcraft.yaml
+      
   # Part 1: Clone DataHub v1.4.0, build the primary virtualenv with
   # datahub-actions + metadata-ingestion, create bundled ingestion venvs
   # for the selected plugins, and stage scripts + config.

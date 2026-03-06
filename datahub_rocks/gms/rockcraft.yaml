@@ -36,6 +36,15 @@ checks:
       url: "http://localhost:8080/health"
 
 parts:
+  # ---- Metadata ----  
+  rock-source:
+    plugin: dump
+    source: .
+    organize:
+      rockcraft.yaml: rockcraft.yaml
+    stage:
+      - rockcraft.yaml
+
   # Part 1: Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
   # Upgrade JAR, then collect all scripts, configs, and init files
   # required at runtime.
