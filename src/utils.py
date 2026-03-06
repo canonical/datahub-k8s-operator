@@ -4,30 +4,14 @@
 """Collection of helper methods."""
 
 import logging
-import os
 import random
 import secrets
 import string
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from ops import pebble
 
 logger = logging.getLogger(__name__)
-
-
-def get_abs_path(*relative_path: str) -> str:
-    """Get the absolute path for a file relative to the charm's root directory.
-
-    Args:
-        relative_path: Tuple of path segments relative to the charm's root directory.
-
-    Returns:
-        Absolute path of the given file or directory under the charm's root directory.
-    """
-    charm_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    if not relative_path:
-        return charm_dir
-    return os.path.join(charm_dir, *relative_path)
 
 
 def push_contents_to_file(container: Any, contents: pebble._IOSource, dest_path: str, permissions: int) -> None:
@@ -56,21 +40,6 @@ def push_contents_to_file(container: Any, contents: pebble._IOSource, dest_path:
         raise ValueError(f"invalid content type: '{type(contents)}'")
 
     container.push(dest_path, contents, make_dirs=True, permissions=permissions)
-
-
-def push_file(container: Any, src_path: Tuple[str, ...], dest_path: str, permissions: int) -> None:
-    """Push files from the charm directory to the path in the given container.
-
-    Args:
-        container: The container to which the script should be pushed.
-        src_path: Path of the source file given relative to the repository root.
-        dest_path: Absolute path to place the file in, including the file name.
-        permissions: Permissions to use for the file.
-    """
-    src_abs_path = get_abs_path(*src_path)
-    with open(src_abs_path, "r") as fp:
-        contents = fp.read()
-    push_contents_to_file(container, contents, dest_path, permissions)
 
 
 def generate_secret(length: int = 32) -> str:
