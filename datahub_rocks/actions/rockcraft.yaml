@@ -36,7 +36,7 @@ parts:
       rockcraft.yaml: rockcraft.yaml
     stage:
       - rockcraft.yaml
-      
+
   # Part 1: Clone DataHub v1.4.0, build the primary virtualenv with
   # datahub-actions + metadata-ingestion, create bundled ingestion venvs
   # for the selected plugins, and stage scripts + config.
@@ -136,6 +136,8 @@ parts:
         "${CRAFT_PART_INSTALL}/usr/bin/uv"
       install -m 755 /snap/astral-uv/current/bin/uvx \
         "${CRAFT_PART_INSTALL}/usr/bin/uvx"
+    stage:
+      - -etc/datahub/actions/system/conf/executor.yaml
 
   # Part 2: Charm-managed executor config baked into the image.
   # Overwrites the upstream executor.yaml with a Juju-compatible version.
@@ -145,7 +147,7 @@ parts:
     after:
       - datahub-actions-build
     organize:
-      executor.yaml: etc/datahub/actions/system/conf/executor.yaml
+      files/executor.yaml: etc/datahub/actions/system/conf/executor.yaml
     prime:
       - etc/datahub/actions/system/conf/executor.yaml
 

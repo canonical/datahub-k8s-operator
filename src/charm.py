@@ -17,7 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
 from charms.nginx_ingress_integrator.v0.nginx_route import require_nginx_route
-from ops.pebble import CheckStatus, ModelError, PathError
+from ops.pebble import CheckStatus, PathError
 
 import exceptions
 import literals
@@ -188,7 +188,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                     self.unit.set_workload_version(meta["version"])
                 else:
                     raise ValueError("Cannot find 'version' in 'rockcraft.yaml'.")
-            except (ModelError, PathError, ValueError, yaml.YAMLError) as e:
+            except (ops.ModelError, PathError, ValueError, yaml.YAMLError) as e:
                 logger.info("Could not get workload version: %s", str(e))
                 event.defer()
 
