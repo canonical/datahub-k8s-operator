@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Generic runner script that will duplex the logs
 # and log the environment variables.

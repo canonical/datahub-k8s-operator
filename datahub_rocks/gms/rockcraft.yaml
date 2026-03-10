@@ -123,10 +123,10 @@ parts:
   # These scripts are shared across rocks and live in datahub_rocks/shared/.
   charm-scripts:
     plugin: dump
-    source: ../shared/scripts/
+    source: .
     organize:
-      runner.sh: charm-scripts/runner.sh
-      init-truststore.sh: charm-scripts/init-truststore.sh
+      files/runner.sh: charm-scripts/runner.sh
+      files/init-truststore.sh: charm-scripts/init-truststore.sh
     override-prime: |
       craftctl default
       chmod 755 charm-scripts/runner.sh
@@ -158,6 +158,7 @@ parts:
     plugin: nil
     stage-packages:
       - base-files
+      # Do not remove without finding a way to execute the scripts under `files`!
       - bash
       - coreutils
       - ca-certificates

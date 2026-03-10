@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # TODO (mertalpt): Consider changing the default storepass.
 

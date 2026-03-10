@@ -46,7 +46,7 @@ parts:
       rockcraft.yaml: rockcraft.yaml
     stage:
       - rockcraft.yaml
-      
+
   # Part 1: Clone DataHub at v1.4.0 and build the frontend distribution.
   # Only the four artifact groups required at runtime are copied into
   # CRAFT_PART_INSTALL; the Gradle cache, source tree, and JDK are
@@ -88,9 +88,9 @@ parts:
   # These scripts are shared across rocks and live in datahub_rocks/shared/.
   charm-scripts:
     plugin: dump
-    source: ../shared/scripts/
+    source: .
     organize:
-      init-truststore.sh: charm-scripts/init-truststore.sh
+      files/init-truststore.sh: charm-scripts/init-truststore.sh
     override-prime: |
       craftctl default
       chmod 755 charm-scripts/init-truststore.sh
@@ -120,6 +120,7 @@ parts:
     plugin: nil
     stage-packages:
       - base-files
+      # Do not remove without finding a way to execute the scripts under `files`!
       - bash
       - ca-certificates
       - curl
