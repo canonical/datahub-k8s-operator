@@ -45,7 +45,7 @@ parts:
     stage:
       - rockcraft.yaml
 
-  # Part 1: Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
+  # Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
   # Upgrade JAR, then collect all scripts, configs, and init files
   # required at runtime.
   datahub-build:
@@ -62,6 +62,9 @@ parts:
       - python3.11-venv
     override-build: |
       set -eu
+
+      # Ensure python points to python3.11
+      ln -sf /usr/bin/python3.11 /usr/bin/python
 
       # ── Gradle build ────────────────────────────────────────────────
       ./gradlew :metadata-service:war:build :datahub-upgrade:build \
@@ -119,20 +122,18 @@ parts:
       install -Dm644 "${CACERTS}" \
         "${CRAFT_PART_INSTALL}/tmp/kafka.client.truststore.jks"
 
-  # Part 2: Charm-managed scripts baked into the image.
+  # Charm-managed scripts baked into the image.
   # These scripts are shared across rocks and live in datahub_rocks/shared/.
   charm-scripts:
     plugin: dump
     source: .
     organize:
       files/runner.sh: charm-scripts/runner.sh
-      files/init-truststore.sh: charm-scripts/init-truststore.sh
     override-prime: |
       craftctl default
       chmod 755 charm-scripts/runner.sh
-      chmod 755 charm-scripts/init-truststore.sh
 
-  # Part 3: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
   opentelemetry-agent:
     plugin: dump
     source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
@@ -141,7 +142,7 @@ parts:
     organize:
       opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
 
-  # Part 4: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  # JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
   jmx-prometheus-agent:
     plugin: dump
     source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
@@ -150,7 +151,7 @@ parts:
     organize:
       jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
 
-  # Part 5: Runtime dependencies for the bare-base image.
+  # Runtime dependencies for the bare-base image.
   # Provides the JRE, C library, and CLI tools required at runtime.
   # postgresql-client is needed by postgres-setup/init.sh (psql).
   # jq is needed by elasticsearch-setup/create-indices.sh.

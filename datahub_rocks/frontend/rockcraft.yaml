@@ -47,7 +47,7 @@ parts:
     stage:
       - rockcraft.yaml
 
-  # Part 1: Clone DataHub at v1.4.0 and build the frontend distribution.
+  # Clone DataHub at v1.4.0 and build the frontend distribution.
   # Only the four artifact groups required at runtime are copied into
   # CRAFT_PART_INSTALL; the Gradle cache, source tree, and JDK are
   # excluded from the final image automatically.
@@ -64,6 +64,9 @@ parts:
       - python3.11-dev
       - python3.11-venv
     override-build: |
+      # Ensure python points to python3.11
+      ln -sf /usr/bin/python3.11 /usr/bin/python
+
       ./gradlew :datahub-frontend:dist -x yarnTest -x yarnLint
 
       # Built application (contents of build/stage/main → /datahub-frontend/)
@@ -84,18 +87,7 @@ parts:
         "${CRAFT_PART_INSTALL}/start.sh"
       chmod 755 "${CRAFT_PART_INSTALL}/start.sh"
 
-  # Part 2: Charm-managed scripts baked into the image.
-  # These scripts are shared across rocks and live in datahub_rocks/shared/.
-  charm-scripts:
-    plugin: dump
-    source: .
-    organize:
-      files/init-truststore.sh: charm-scripts/init-truststore.sh
-    override-prime: |
-      craftctl default
-      chmod 755 charm-scripts/init-truststore.sh
-
-  # Part 3a: OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
   opentelemetry-agent:
     plugin: dump
     source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
@@ -104,7 +96,7 @@ parts:
     organize:
       opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
 
-  # Part 3b: JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  # JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
   jmx-prometheus-agent:
     plugin: dump
     source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
@@ -113,14 +105,13 @@ parts:
     organize:
       jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
 
-  # Part 4: Runtime dependencies for the bare-base image.
+  # Runtime dependencies for the bare-base image.
   # apt resolves the full transitive closure; prime exclusions strip
   # documentation and JDK source to minimise final image size.
   runtime-packages:
     plugin: nil
     stage-packages:
       - base-files
-      # Do not remove without finding a way to execute the scripts under `files`!
       - bash
       - ca-certificates
       - curl

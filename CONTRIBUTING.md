@@ -108,6 +108,8 @@ cd /path/to/repository
 rm -rf .tox venv
 ```
 
+3. *Nothing to be done for rock*: Rock building targets watch for changes to the `rockcraft.yaml` file for deciding if they need to rebuild. If you need to change something else, e.g. scripts that go into the rocks, `touch rockcraft.yaml` to force a build.
+
 ## Code quality
 
 You can run linters, static analysis, and unit tests with:
