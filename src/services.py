@@ -35,6 +35,57 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _import_certificates_to_truststore(container, certificates: str, alias_prefix: str) -> None:
+    """Import all certificates in a PEM bundle into JVM cacerts.
+
+    Args:
+        container: Container where keytool is executed.
+        certificates: PEM bundle (possibly containing multiple certificates).
+        alias_prefix: Prefix for aliases used in keytool.
+    """
+    cert_chain = utils.split_certificates(certificates)
+    for index, cert in enumerate(cert_chain):
+        cert_path = f"/charm-external/opensearch_ca_{index}.pem"
+        cert_alias = f"{alias_prefix}-{index}"
+
+        utils.push_contents_to_file(container, cert, cert_path, 0o644)
+
+        # Check if alias already exists; skip import if it does to avoid truststore mutations while running.
+        try:
+            check_process = container.exec(
+                [
+                    literals.KEYTOOL_BIN_PATH,
+                    "-list",
+                    "-cacerts",
+                    "-alias",
+                    cert_alias,
+                    "-storepass",
+                    "changeit",
+                ]
+            )
+            check_process.wait_output()
+            logger.debug("Certificate alias '%s' already exists in truststore, skipping import", cert_alias)
+            continue
+        except Exception:
+            logger.debug("Certificate alias '%s' not found in truststore, will import", cert_alias)
+
+        import_process = container.exec(
+            [
+                literals.KEYTOOL_BIN_PATH,
+                "-importcert",
+                "-cacerts",
+                "-file",
+                cert_path,
+                "-alias",
+                cert_alias,
+                "-storepass",
+                "changeit",
+                "-noprompt",
+            ],
+        )
+        import_process.wait_output()
+
+
 def _kafka_topic_names(prefix: str) -> Dict[str, str]:
     """Compiles the environment variables for Kafka topic names.
 
@@ -406,24 +457,15 @@ class FrontendService(AbstractService):
             return False
 
         certificates = context.charm._state.opensearch_connection["tls-ca"]
-        root_ca_cert = utils.split_certificates(certificates)[1]
 
         container = context.charm.unit.get_container(cls.name)
 
         try:
-            utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
-            process = container.exec(
-                [
-                    literals.KEYTOOL_BIN_PATH,
-                    "-importcert",
-                    "-cacerts",
-                    "-file", literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "-alias", literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
-                    "-storepass", "changeit",
-                    "-noprompt",
-                ],
+            _import_certificates_to_truststore(
+                container,
+                certificates,
+                literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
             )
-            process.wait_output()
         except Exception as e:
             logger.info("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
@@ -733,22 +775,13 @@ class GMSService(AbstractService):
             return
 
         certificates = context.charm._state.opensearch_connection["tls-ca"]
-        root_ca_cert = utils.split_certificates(certificates)[1]
 
         try:
-            utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
-            process = container.exec(
-                [
-                    literals.KEYTOOL_BIN_PATH,
-                    "-importcert",
-                    "-cacerts",
-                    "-file", literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "-alias", literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
-                    "-storepass", "changeit",
-                    "-noprompt",
-                ],
+            _import_certificates_to_truststore(
+                container,
+                certificates,
+                literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
             )
-            process.wait_output()
         except Exception as e:
             logger.info("Failed truststore initialization for datahub-gms: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-gms")
@@ -819,6 +852,10 @@ class GMSService(AbstractService):
 
         env = {
             "DATAHUB_ANALYTICS_ENABLED": "true",
+            "JAVA_TOOL_OPTIONS": (
+                f"-Djavax.net.ssl.trustStore={literals.JAVA_HOME}/lib/security/cacerts "
+                "-Djavax.net.ssl.trustStorePassword=changeit"
+            ),
             "SCHEMA_REGISTRY_SYSTEM_UPDATE": "true",
             "SPRING_KAFKA_PROPERTIES_AUTO_REGISTER_SCHEMAS": "true",
             "SPRING_KAFKA_PROPERTIES_USE_LATEST_VERSION": "true",
