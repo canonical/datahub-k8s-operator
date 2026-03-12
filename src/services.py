@@ -413,11 +413,15 @@ class FrontendService(AbstractService):
         try:
             utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
-                [literals.TRUSTSTORE_INIT_SCRIPT_PATH],
-                environment={
-                    "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
-                },
+                [
+                    literals.KEYTOOL_BIN_PATH,
+                    "-importcert",
+                    "-cacerts",
+                    "-file", literals.OPENSEARCH_ROOT_CA_CERT_PATH,
+                    "-alias", literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
+                    "-storepass", "changeit",
+                    "-noprompt",
+                ],
             )
             process.wait_output()
         except Exception as e:
@@ -734,11 +738,15 @@ class GMSService(AbstractService):
         try:
             utils.push_contents_to_file(container, root_ca_cert, literals.OPENSEARCH_ROOT_CA_CERT_PATH, 0o644)
             process = container.exec(
-                [literals.TRUSTSTORE_INIT_SCRIPT_PATH],
-                environment={
-                    "CERT_PATH": literals.OPENSEARCH_ROOT_CA_CERT_PATH,
-                    "CERT_ALIAS": literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
-                },
+                [
+                    literals.KEYTOOL_BIN_PATH,
+                    "-importcert",
+                    "-cacerts",
+                    "-file", literals.OPENSEARCH_ROOT_CA_CERT_PATH,
+                    "-alias", literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
+                    "-storepass", "changeit",
+                    "-noprompt",
+                ],
             )
             process.wait_output()
         except Exception as e:
@@ -771,7 +779,7 @@ class GMSService(AbstractService):
             process = container.exec(
                 [
                     literals.RUNNER_PATH,
-                    "java",
+                    literals.JAVA_BIN_PATH,
                     "-jar",
                     literals.UPGRADE_JAR_PATH,
                     "-u",
@@ -871,7 +879,7 @@ class GMSService(AbstractService):
         environment = cls._compile_upgrade_environment(context)
         command = [
             literals.RUNNER_PATH,
-            "java",
+            literals.JAVA_BIN_PATH,
             "-jar",
             literals.UPGRADE_JAR_PATH,
             "-u",

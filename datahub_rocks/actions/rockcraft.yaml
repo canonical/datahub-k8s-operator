@@ -68,6 +68,9 @@ parts:
     override-build: |
       set -eu
 
+      # Ensure python points to python3.11
+      ln -sf /usr/bin/python3.11 /usr/bin/python
+
       RELEASE_VERSION="1.4.0.5"
 
       # Patch version strings so installed packages report 1.4.0

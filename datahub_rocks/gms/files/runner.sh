@@ -5,7 +5,11 @@
 
 # Capture the command and its name
 CMD="$*"
-CMD_NAME=$(basename "$1")
+RAW_CMD_NAME=$(basename -- "$1")
+CMD_NAME=$(printf '%s' "$RAW_CMD_NAME" | tr -cs 'A-Za-z0-9._-' '_')
+if [ -z "$CMD_NAME" ]; then
+    CMD_NAME="unknown-cmd"
+fi
 RUNNER_NAME=$(basename "$0")
 
 # Define log files

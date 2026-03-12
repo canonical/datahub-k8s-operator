@@ -13,7 +13,6 @@ INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec
 
 # Paths for scripts baked into the rocks (see datahub_rocks/shared/scripts/).
 RUNNER_PATH = "/charm-scripts/runner.sh"
-TRUSTSTORE_INIT_SCRIPT_PATH = "/charm-scripts/init-truststore.sh"
 
 OPENSEARCH_CERTIFICATES_PATH = "/charm-external/opensearch_certificates.pem"
 OPENSEARCH_ROOT_CA_CERT_PATH = "/charm-external/opensearch_root_ca_cert.pem"
@@ -25,3 +24,6 @@ POSTGRES_SETUP_WORKDIR = "/datahub/postgres-setup"
 OPENSEARCH_SETUP_SCRIPT = "/datahub/elasticsearch-setup/create-indices.sh"
 OPENSEARCH_SETUP_WORKDIR = "/datahub/elasticsearch-setup"
 UPGRADE_JAR_PATH = "/datahub/datahub-upgrade/bin/datahub-upgrade.jar"
+JAVA_HOME = "/usr/lib/jvm/java-17-openjdk-amd64"
+JAVA_BIN_PATH = f"{JAVA_HOME}/bin/java"
+KEYTOOL_BIN_PATH = f"{JAVA_HOME}/bin/keytool"
