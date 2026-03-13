@@ -15,7 +15,7 @@ platforms:
 run-user: _daemon_
 
 services:
-  gms:
+  datahub-gms:
     override: merge
     command: "/datahub/datahub-gms/scripts/start.sh"
     on-check-failure:
@@ -36,20 +36,28 @@ checks:
       url: "http://localhost:8080/health"
 
 parts:
-  # ---- Metadata ----  
+  # ---- Metadata ----
+  # Also, script files need minor rewriting to use
+  # bash and refer to files in their new locations.
   rock-source:
     plugin: dump
     source: .
     organize:
       rockcraft.yaml: rockcraft.yaml
+      files/init.sh: datahub/postgres-setup/init.sh
+      files/create-indices.sh: datahub/elasticsearch-setup/create-indices.sh
     stage:
       - rockcraft.yaml
+      - datahub/postgres-setup/init.sh
+      - datahub/elasticsearch-setup/create-indices.sh
 
   # Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
   # Upgrade JAR, then collect all scripts, configs, and init files
   # required at runtime.
   datahub-build:
     plugin: nil
+    after:
+      - rock-source
     source: https://github.com/acryldata/datahub.git
     source-tag: v1.4.0.5
     source-depth: 1
@@ -101,7 +109,7 @@ parts:
         "${CRAFT_PART_INSTALL}/datahub/datahub-gms/resources/entity-registry.yml"
 
       # ── PostgreSQL setup artifacts ──────────────────────────────────
-      install -Dm755 docker/postgres-setup/init.sh \
+      install -Dm755 "${CRAFT_STAGE}/datahub/postgres-setup/init.sh" \
         "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init.sh"
       install -Dm644 docker/postgres-setup/init.sql \
         "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init.sql"
@@ -109,7 +117,7 @@ parts:
         "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init-cdc.sql"
 
       # ── Elasticsearch/OpenSearch setup artifacts ────────────────────
-      install -Dm755 docker/elasticsearch-setup/create-indices.sh \
+      install -Dm755 "${CRAFT_STAGE}/datahub/elasticsearch-setup/create-indices.sh" \
         "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/create-indices.sh"
       mkdir -p "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/index"
       cp -r metadata-service/restli-servlet-impl/src/main/resources/index/* \
@@ -153,8 +161,9 @@ parts:
 
   # Runtime dependencies for the bare-base image.
   # Provides the JRE, C library, and CLI tools required at runtime.
-  # postgresql-client is needed by postgres-setup/init.sh (psql).
-  # jq is needed by elasticsearch-setup/create-indices.sh.
+  # postgresql-client provides psql.
+  # curl, jq, grep, sed are explicitly included.
+  # coreutils provides base64 and tee.
   runtime-packages:
     plugin: nil
     stage-packages:
@@ -162,6 +171,8 @@ parts:
       # Do not remove without finding a way to execute the scripts under `files`!
       - bash
       - coreutils
+      - grep
+      - sed
       - ca-certificates
       - curl
       - libc6

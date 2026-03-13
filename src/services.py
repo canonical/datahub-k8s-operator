@@ -202,7 +202,7 @@ class ActionsService(AbstractService):
     """
 
     name = "datahub-actions"
-    command = "/bin/sh -c /start_datahub_actions.sh"
+    command = " /start_datahub_actions.sh"
     healthcheck = None
 
     @classmethod
@@ -281,7 +281,7 @@ class FrontendService(AbstractService):
     """
 
     name = "datahub-frontend"
-    command = "/bin/sh -c /start.sh"
+    command = " /start.sh"
     healthcheck = {
         "endpoint": "/admin",
         "port": "9002",
@@ -485,7 +485,7 @@ class GMSService(AbstractService):
     """
 
     name = "datahub-gms"
-    command = "/bin/sh -c /datahub/datahub-gms/scripts/start.sh"
+    command = "/datahub/datahub-gms/scripts/start.sh"
     healthcheck = {
         "endpoint": "/health",
         "port": "8080",
