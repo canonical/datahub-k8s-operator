@@ -38,14 +38,18 @@ checks:
       url: "http://localhost:9002/admin"
 
 parts:
-  # ---- Metadata ----  
+  # ---- Metadata ----
+  # Also, script files need minor rewriting to use
+  # bash and refer to files in their new locations.
   rock-source:
     plugin: dump
     source: .
     organize:
       rockcraft.yaml: rockcraft.yaml
+      files/start.sh: start.sh
     stage:
       - rockcraft.yaml
+      - start.sh
 
   # Clone DataHub at v1.4.0 and build the frontend distribution.
   # Only the four artifact groups required at runtime are copied into
@@ -53,6 +57,8 @@ parts:
   # excluded from the final image automatically.
   datahub-frontend-build:
     plugin: nil
+    after:
+      - rock-source
     source: https://github.com/acryldata/datahub.git
     source-tag: v1.4.0.5
     source-depth: 1
@@ -81,11 +87,6 @@ parts:
       # Prometheus client config
       cp docker/monitoring/client-prometheus-config.yaml \
         "${CRAFT_PART_INSTALL}/datahub-frontend/"
-
-      # Startup script
-      cp docker/datahub-frontend/start.sh \
-        "${CRAFT_PART_INSTALL}/start.sh"
-      chmod 755 "${CRAFT_PART_INSTALL}/start.sh"
 
   # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
   opentelemetry-agent:
