@@ -43,13 +43,17 @@ parts:
     plugin: dump
     source: .
     organize:
-      rockcraft.yaml: rockcraft.yaml
-      files/init.sh: datahub/postgres-setup/init.sh
       files/create-indices.sh: datahub/elasticsearch-setup/create-indices.sh
+      files/init.sh: datahub/postgres-setup/init.sh
+      files/start.sh: datahub/datahub-gms/scripts/start.sh
+      files/runner.sh: charm-scripts/runner.sh
+      rockcraft.yaml: rockcraft.yaml
     stage:
-      - rockcraft.yaml
-      - datahub/postgres-setup/init.sh
       - datahub/elasticsearch-setup/create-indices.sh
+      - datahub/postgres-setup/init.sh
+      - datahub/datahub-gms/scripts/start.sh
+      - charm-scripts/runner.sh
+      - rockcraft.yaml
 
   # Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
   # Upgrade JAR, then collect all scripts, configs, and init files
@@ -82,7 +86,7 @@ parts:
       install -Dm644 metadata-service/war/build/libs/war.war \
         "${CRAFT_PART_INSTALL}/datahub/datahub-gms/bin/war.war"
 
-      install -Dm755 docker/datahub-gms/start.sh \
+      install -Dm755 "${CRAFT_STAGE}/datahub/datahub-gms/scripts/start.sh" \
         "${CRAFT_PART_INSTALL}/datahub/datahub-gms/scripts/start.sh"
 
       install -Dm644 docker/monitoring/client-prometheus-config.yaml \
@@ -129,17 +133,6 @@ parts:
       CACERTS="/usr/lib/jvm/java-17-openjdk-amd64/lib/security/cacerts"
       install -Dm644 "${CACERTS}" \
         "${CRAFT_PART_INSTALL}/tmp/kafka.client.truststore.jks"
-
-  # Charm-managed scripts baked into the image.
-  # These scripts are shared across rocks and live in datahub_rocks/shared/.
-  charm-scripts:
-    plugin: dump
-    source: .
-    organize:
-      files/runner.sh: charm-scripts/runner.sh
-    override-prime: |
-      craftctl default
-      chmod 755 charm-scripts/runner.sh
 
   # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
   opentelemetry-agent:
