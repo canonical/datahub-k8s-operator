@@ -47,7 +47,7 @@ juju add-model datahub-k8s
 
 [1]: Minor and/or patch versions of the tech stack can introduce regressions, if you are having problems use the following commands to switch to tested channels:
 ```shell
-sudo snap switch juju --channel 3.5/stable
+sudo snap switch juju --channel 3/stable
 sudo snap refresh juju
 sudo snap switch microk8s --channel 1.29/stable
 sudo snap refresh microk8s --classic
