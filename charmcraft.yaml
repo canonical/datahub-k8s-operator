@@ -51,6 +51,7 @@ charm-libs:
 parts:
   charm:
     charm-binary-python-packages:
+      - pydantic
       - pydantic-core
     build-packages:
       - rustc

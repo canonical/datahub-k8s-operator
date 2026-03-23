@@ -272,7 +272,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
             container = self.unit.get_container(service.name)
             if not container.can_connect():
-                logger.info("cannot connect to service '%s'")
+                logger.info("cannot connect to service '%s'", service.name)
                 is_not_ready = True
                 continue
             logger.debug("performing up check for '%s'", service.name)
