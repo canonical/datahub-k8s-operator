@@ -163,6 +163,7 @@ parts:
       - base-files
       # Do not remove without finding a way to execute the scripts under `files`!
       - bash
+      - dash
       - coreutils
       - grep
       - sed

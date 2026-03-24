@@ -66,7 +66,7 @@ help:
 	@echo "  clean-charmcraft     Clean charmcraft environment"
 	@echo "  clean-rockcraft      Clean all rockcraft environments"
 	@echo "  create-secret        Create a Juju secret with random encryption keys"
-	@echo "  deploy-local         Deploy charm with local resources (requires SECRET_ID=<id>)"
+	@echo "  deploy-local         Deploy charm with local resources using image digests (requires SECRET_ID=<id>)"
 	@echo "  fmt                  Apply coding style standards to code"
 	@echo "  import-rock          Build and import all rocks into MicroK8s"
 	@echo "  import-rock-actions  Build and import the actions rock into MicroK8s"
@@ -209,11 +209,15 @@ deploy-local:
 ifndef SECRET_ID
 	$(error SECRET_ID is required. Usage: make deploy-local SECRET_ID=<secret-id>)
 endif
-	@echo "Deploying charm with local resources..."
+	@echo "Fetching image digests..."
+	@ACTIONS_DIGEST=$$(skopeo inspect --tls-verify=false docker://$(REGISTRY)/$(ACTIONS_NAME):latest 2>/dev/null | jq -r '.Digest' || echo "latest") && \
+	FRONTEND_DIGEST=$$(skopeo inspect --tls-verify=false docker://$(REGISTRY)/$(FRONTEND_NAME):latest 2>/dev/null | jq -r '.Digest' || echo "latest") && \
+	GMS_DIGEST=$$(skopeo inspect --tls-verify=false docker://$(REGISTRY)/$(GMS_NAME):latest 2>/dev/null | jq -r '.Digest' || echo "latest") && \
+	echo "Deploying charm with local resources (using digests)..." && \
 	juju deploy $(CHARM_FILE) \
-		--resource datahub-actions=$(REGISTRY)/$(ACTIONS_NAME):latest \
-		--resource datahub-frontend=$(REGISTRY)/$(FRONTEND_NAME):latest \
-		--resource datahub-gms=$(REGISTRY)/$(GMS_NAME):latest \
+		--resource datahub-actions=$(REGISTRY)/$(ACTIONS_NAME)@$$ACTIONS_DIGEST \
+		--resource datahub-frontend=$(REGISTRY)/$(FRONTEND_NAME)@$$FRONTEND_DIGEST \
+		--resource datahub-gms=$(REGISTRY)/$(GMS_NAME)@$$GMS_DIGEST \
 		--config encryption-keys-secret-id=$(SECRET_ID)
 
 # --- Clean ---

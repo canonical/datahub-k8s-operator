@@ -114,8 +114,10 @@ parts:
     stage-packages:
       - base-files
       - bash
+      - dash
       - ca-certificates
       - curl
+      - findutils
       - libc6
       - libsnappy1v5
       - libsqlite3-0

@@ -75,9 +75,6 @@ parts:
 
       # Patch version strings so installed packages report 1.4.0
       python3.11 python-build/version_updater.py \
-        --directory ./metadata-ingestion/ \
-        --version "${RELEASE_VERSION}" --expected-update-count 1
-      python3.11 python-build/version_updater.py \
         --directory ./datahub-actions/ \
         --version "${RELEASE_VERSION}" --expected-update-count 1
 
@@ -86,7 +83,9 @@ parts:
       export VIRTUAL_ENV="/opt/datahub/venv"
       export PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
-      uv pip install './metadata-ingestion/[base,s3-slim,gcs-slim,abs-slim]'
+      # Install acryl-datahub from PyPI (includes pre-generated metadata
+      # models that are absent from the git source tree).
+      uv pip install "acryl-datahub[base,s3-slim,gcs-slim,abs-slim]==${RELEASE_VERSION}"
       uv pip install \
         './datahub-actions/[kafka,executor,slack,teams,tag_propagation,term_propagation,doc_propagation,observability]'
 
@@ -106,9 +105,24 @@ parts:
 
         bash -c "source ${venv}/bin/activate && \
           uv pip install \
-            './metadata-ingestion/[datahub-rest,datahub-kafka,file,${extra}]' \
+            \"acryl-datahub[datahub-rest,datahub-kafka,file,${extra}]==${RELEASE_VERSION}\" \
             --constraints ${BUNDLED_VENV_PATH}/constraints.txt"
         echo "==> Done: ${plugin}-bundled"
+      done
+
+      # ── Fix Python symlinks for bare-base compatibility ─────────────
+      # uv venv creates symlinks back to the system Python, which does
+      # not exist at runtime in a bare-base image.  Replace them with
+      # copies of the real binary so the venvs are self-contained.
+      real_python="$(readlink -f /opt/datahub/venv/bin/python)"
+      for venv_bin in /opt/datahub/venv/bin /opt/datahub/venvs/*/bin; do
+        [ -d "${venv_bin}" ] || continue
+        for link in python python3 python3.11; do
+          [ -L "${venv_bin}/${link}" ] && rm "${venv_bin}/${link}"
+        done
+        cp "${real_python}" "${venv_bin}/python"
+        ln -s python "${venv_bin}/python3"
+        ln -s python "${venv_bin}/python3.11"
       done
 
       # ── Collect artefacts ───────────────────────────────────────────
@@ -155,18 +169,20 @@ parts:
       - etc/datahub/actions/system/conf/executor.yaml
 
   # Part 3: Runtime dependencies for the bare-base image.
-  # Provides the C library and shared libraries required by native Python
-  # extension modules at runtime.  Python 3.11 itself is delivered by the
-  # primary venv (bundled in part 1).
+  # Provides the C library, Python 3.11 stdlib, and shared libraries
+  # required by native Python extension modules at runtime.
   runtime-packages:
     plugin: nil
     stage-packages:
       - base-files
       - bash
+      - dash
       - coreutils
       - ca-certificates
       - curl
       - libc6
+      - libpython3.11-minimal
+      - libpython3.11-stdlib
       - libsasl2-2
       - libsasl2-modules
       - libsasl2-modules-gssapi-mit
