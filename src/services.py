@@ -251,6 +251,14 @@ class ActionsService(AbstractService):
         kafka_conn = context.charm._state.kafka_connection
 
         env = {
+            "JAVA_HOME": literals.JAVA_HOME,
+            "VIRTUAL_ENV": "/opt/datahub/venv",
+            "PATH": "/opt/datahub/venv/bin:/usr/bin:/bin",
+            "HOME": "/home/datahub",
+            "REQUESTS_CA_BUNDLE": "/etc/ssl/certs/ca-certificates.crt",
+            "SSL_CERT_FILE": "/etc/ssl/certs/ca-certificates.crt",
+            "DATAHUB_ACTIONS_SYSTEM_CONFIGS_PATH": "/etc/datahub/actions/system/conf",
+            "DATAHUB_BUNDLED_VENV_PATH": "/opt/datahub/venvs",
             "DATAHUB_TELEMETRY_ENABLED": "false",
             "DATAHUB_GMS_PROTOCOL": "http",
             # TODO (mertalpt): This changes when we split services into multiple charms.
@@ -342,6 +350,7 @@ class FrontendService(AbstractService):
         frontend_secret_key = encryption_secret.get_content(refresh=True)["frontend-key"]
 
         env = {
+            "JAVA_HOME": literals.JAVA_HOME,
             "THEME_V2_DEFAULT": "true",
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
@@ -546,6 +555,7 @@ class GMSService(AbstractService):
         gms_secret_key = encryption_secret.get_content(refresh=True)["gms-key"]
 
         env = {
+            "JAVA_HOME": literals.JAVA_HOME,
             "THEME_V2_DEFAULT": "true",
             "DATAHUB_TELEMETRY_ENABLED": "false",
             "EBEAN_DATASOURCE_PORT": db_conn["port"],
