@@ -113,11 +113,13 @@ parts:
     plugin: nil
     stage-packages:
       - base-files
+      # Do not remove without finding a way to execute the scripts under `files`!
       - bash
       - dash
       - ca-certificates
       - curl
       - findutils
+      - sed
       - libc6
       - libsnappy1v5
       - libsqlite3-0

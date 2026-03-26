@@ -352,6 +352,7 @@ class FrontendService(AbstractService):
         env = {
             "JAVA_HOME": literals.JAVA_HOME,
             "THEME_V2_DEFAULT": "true",
+            "MFE_CONFIG_FILE_PATH": "/datahub-frontend/conf/mfe.config.dev.yaml",
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
             # TODO (mertalpt): This changes when we split services into multiple charms.
