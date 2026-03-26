@@ -168,7 +168,20 @@ parts:
     prime:
       - etc/datahub/actions/system/conf/executor.yaml
 
-  # Part 3: Runtime dependencies for the bare-base image.
+  # Part 3: Generate the combined CA-certificates bundle.
+  # The ca-certificates stage-package provides individual PEM files but the
+  # combined /etc/ssl/certs/ca-certificates.crt is normally created by
+  # update-ca-certificates, which does not run during rockcraft extraction.
+  generate-ca-bundle:
+    plugin: nil
+    after:
+      - runtime-packages
+    override-build: |
+      mkdir -p "${CRAFT_PART_INSTALL}/etc/ssl/certs"
+      cat "${CRAFT_STAGE}"/usr/share/ca-certificates/mozilla/*.crt > \
+        "${CRAFT_PART_INSTALL}/etc/ssl/certs/ca-certificates.crt"
+
+  # Part 4: Runtime dependencies for the bare-base image.
   # Provides the C library, Python 3.11 stdlib, and shared libraries
   # required by native Python extension modules at runtime.
   runtime-packages:
