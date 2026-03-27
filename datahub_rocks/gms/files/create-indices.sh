@@ -102,7 +102,7 @@ function create_if_not_exists {
   elif [ $RESOURCE_STATUS -eq 404 ]; then
     # resource doesn't exist -> need to create it
     echo -e ">>> creating $RESOURCE_ADDRESS because it doesn't exist ..."
-    # use the file at given path as definition, but first replace all occurences of `PREFIX`
+    # use the file at given path as definition, but first replace all occurrences of `PREFIX`
     # placeholder within the file with the actual prefix value
     TMP_SOURCE_PATH="/tmp/$RESOURCE_DEFINITION_NAME"
     sed -e "s/PREFIX/$PREFIX/g" "$INDEX_DEFINITIONS_ROOT/$RESOURCE_DEFINITION_NAME" \

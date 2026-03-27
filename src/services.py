@@ -3,8 +3,6 @@
 
 """Define DataHub services."""
 
-# pylint: disable=C0302
-
 # TODO (mertalpt): Convert the module to a package and split up services.
 
 # Some General Notes
@@ -50,7 +48,8 @@ def _import_certificates_to_truststore(container, certificates: str, alias_prefi
 
         utils.push_contents_to_file(container, cert, cert_path, 0o644)
 
-        # Check if alias already exists; skip import if it does to avoid truststore mutations while running.
+        # Check if alias already exists;
+        # skip import if it does to avoid truststore mutations while running.
         try:
             check_process = container.exec(
                 [
@@ -644,9 +643,6 @@ class GMSService(AbstractService):
 
         Returns:
             If initialization scripts were run and were successful.
-
-        Raises:
-            InitializationFailedError: If the initialization fails.
         """
         if not cls.is_ready(context):
             logger.info("datahub-gms is not ready to be initialized, skipping initialization")
