@@ -1,4 +1,7 @@
 #!/bin/bash
+# shellcheck disable=SC1000-SC9999
+# ^ Ignore this file in `shellcheck` from the `test` CI workflow.
+# This file comes from upstream DataHub with minimal changes.
 
 OTEL_AGENT=""
 if [[ $ENABLE_OTEL == true ]]; then
