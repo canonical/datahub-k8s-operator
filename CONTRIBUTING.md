@@ -2,29 +2,134 @@
 
 To make contributions to this charm, you'll need a working [development setup](https://juju.is/docs/sdk/dev-setup).
 
-You can create an environment for development with `tox`:
+A lot of the commands you would need are covered with the [Makefile](./Makefile), learn more by running `make help`.
+
+**Note:** It is recommended to build on the host and deploy in a [Multipass](https://canonical.com/multipass/install) instance.
+Use `multipass mount` to mount the project directory with the build artifacts into your Multipass instance.
+
+## Environment for coding
+
+You can install the dependencies for coding with:
 
 ```shell
-tox devenv -e integration
+# uv
+sudo snap install astral-uv --channel latest/stable --classic
+uv version
+#> uv 0.9.5 (d5f39331a 2025-10-21)
+
+# Tox
+# Note: If you do this from the VSCode snap's integrated terminal
+# you will have a weird PATH. So, do it from an external terminal.
+uv tool install tox --with tox-uv
+tox --version
+#> 4.32.0
+```
+
+You can create an environment for coding with:
+
+```shell
+make venv
 source venv/bin/activate
 ```
 
-## Testing
+## Environment for building
 
-This project uses `tox` for managing test environments. There are some pre-configured environments that can be used for linting and formatting code when you're preparing contributions to the charm:
+You can install the dependencies for building with:
 
 ```shell
-tox run -e fmt           # update your code according to linting rules
-tox run -e lint          # code style
-tox run -e static        # static type checking
-tox run -e unit          # unit tests
-tox run -e integration   # integration tests
-tox                      # runs 'format', 'lint', 'static', and 'unit' environments
+# LXD
+sudo snap install lxd --channel 5.21/stable
+lxd version
+#> 5.21.4 LTS
+
+sudo adduser $USER lxd
+newgrp lxd
+lxd init --auto
+
+# Charmcraft
+sudo snap install charmcraft --channel latest/stable --classic
+charmcraft version
+#> charmcraft 4.0.1
+
+# Rockcraft
+sudo snap install rockcraft --channel latest/stable --classic
+rockcraft version
+#> rockcraft 1.16.0
+
+# yq
+sudo snap install yq
+yq --version
+#> yq (https://github.com/mikefarah/yq/) version v4.49.2
+
+# Required by `import_rock.sh`
+sudo snap alias rockcraft.skopeo skopeo
 ```
 
-## Recommended development environment setup
+### Verify build environment
 
-The recommended development environment is set up on `multipass`.
+You can verify that you have all the necessary dependencies installed with:
+
+```shell
+make check-build-deps
+```
+
+## Building artifacts
+
+You can build the charm with:
+
+```shell
+make build-charm
+```
+
+You can build all rocks with:
+
+```shell
+make build-rock
+```
+
+Individual rocks can also be built separately:
+
+```shell
+make build-rock-actions
+make build-rock-frontend
+make build-rock-gms
+```
+
+**Common issues:** Some frequent issues with the build step and how to solve them are listed below.
+1. *Missing repository*: Sometimes `multipass` forgets mounts. The solution is to unmount and mount again, from the host machine:
+```shell
+multipass unmount charm-dev
+multipass mount /path/to/repository charm-dev:/path/to/repository
+```
+
+2. *Permission error in pack*: `tox` commands create directories inside the repository that can cause permission issues. The solution is to remove those directories before running `charmcraft pack`.
+```shell
+cd /path/to/repository
+rm -rf .tox venv
+```
+
+3. *Nothing to be done for rock*: Rock building targets watch for changes to the `rockcraft.yaml` file for deciding if they need to rebuild. If you need to change something else, e.g. scripts that go into the rocks, `touch rockcraft.yaml` to force a build.
+
+## Code quality
+
+You can run linters, static analysis, and unit tests with:
+
+```shell
+make fmt     # Runs formatters
+make lint    # Runs linters
+make test    # Runs static analysis and unit tests
+make checks  # Runs all of the above
+
+make test-integration  # Runs integration tests*
+```
+
+*: It is recommended to let CI runners run integration tests on GitHub Actions.
+
+## Deploying locally
+
+### Multipass environment setup
+
+The recommended deployment environment is set up on `multipass`.
 
 Get it via:
 
@@ -49,8 +154,8 @@ juju add-model datahub-k8s
 ```shell
 sudo snap switch juju --channel 3/stable
 sudo snap refresh juju
-sudo snap switch microk8s --channel 1.29/stable
-sudo snap refresh microk8s --classic
+sudo snap switch microk8s --channel 1.34-strict/stable
+sudo snap refresh microk8s
 ```
 
 Afterwards, you will have to recreate the controllers and models from scratch:
@@ -75,7 +180,52 @@ juju switch controller:model
 juju model-config logging-config="<root>=INFO;unit=DEBUG"
 ```
 
-## Deploy the dependencies
+### Deployment environment dependencies
+
+Install the following inside your `multipass` instance:
+
+```shell
+# Juju
+sudo snap install juju --channel 3/stable
+juju version
+#> 3.6.12-genericlinux-amd64
+
+# MicroK8s
+sudo snap install microk8s --channel 1.34-strict/stable
+microk8s version
+#> MicroK8s v1.34.1 revision 8447
+
+sudo microk8s enable hostpath-storage
+sudo microk8s enable registry
+
+sudo usermod -aG snap_microk8s $USER
+
+# Docker
+sudo snap install docker --channel latest/stable
+docker version
+#> ... 28.4.0 ...
+
+sudo groupadd docker
+sudo usermod -aG docker $USER
+newgrp docker
+
+sudo snap disable docker
+sudo snap enable docker
+
+# Both microk8s and docker require new groups
+# and `newgrp` does not cover for both at the same time.
+# A system reboot is recommended at this point.
+
+juju bootstrap microk8s
+```
+
+You can verify that all deployment dependencies are installed with:
+
+```shell
+make check-deploy-deps
+```
+
+### Deploy the dependencies
 
 DataHub has PostgreSQL, Kafka, and OpenSearch as dependencies. Opensearch only has a machine charm, while the others have both a machine and a Kubernetes charm. However, the main deployment scenario is one where dependencies are deployed as machine charms. So, the documentation covers it.
 
@@ -86,81 +236,48 @@ juju switch lxd:datahub-vm
 # the indexes created by DataHub
 juju deploy opensearch --channel 2/edge -n 2
 juju deploy self-signed-certificates
-juju deploy postgresql --channel 14/stable
-juju deploy kafka --channel 3/edge
-juju deploy zookeeper
 juju integrate opensearch self-signed-certificates
-juju integrate kafka zookeeper
 juju offer opensearch:opensearch-client os-client
-juju offer postgresql:database pg-client
-juju offer kafka:kafka-client kafka-client
 ```
 
-Consuming offers:
+Consuming offers and deploying other dependencies:
 ```shell
 juju switch microk8s:datahub-k8s
 juju consume lxd:admin/datahub-vm.os-client os-client
-juju consume lxd:admin/datahub-vm.pg-client pg-client
-juju consume lxd:admin/datahub-vm.kafka-client kafka-client
+juju deploy postgresql-k8s --channel 14/edge
+juju deploy kafka-k8s --channel 3/edge
+juju deploy zookeeper-k8s --channel 3/edge
+juju integrate kafka-k8s zookeeper-k8s
 ```
 
-**Note:** In theory, DataHub can work with both VM and K8s versions of Kafka and PostgreSQL charms.
+**Note:** DataHub should work with both VM and K8s versions of Kafka and PostgreSQL charms.
 
-## Build the charm
+### Deploy the charm
 
-Get the repository on the host machine using:
+First, build and import the rocks into MicroK8s (run on the host where you built):
+
 ```shell
-git clone git@github.com:canonical/datahub-k8s-operator.git
+make import-rock
 ```
 
-For easier development, mount the repository to the `multipass` instance:
-```shell
-multipass mount /path/to/repository charm-dev:/path/to/repository
-```
+Then, create a secret for encryption keys and deploy:
 
-Build the charm inside the `multipass` instance using:
-```shell
-cd /path/to/repository
-charmcraft pack
-```
-
-**Common issues:** Some frequent issues with the build step and how to solve them are listed below.
-1. *Missing repository*: Sometimes `multipass` forgets mounts. The solution is to unmount and mount again, from the host machine:
-```shell
-multipass unmount charm-dev
-multipass mount /path/to/repository charm-dev:/path/to/repository
-```
-
-2. *Permission error in pack*: `tox` commands create directories inside the repository that can cause permission issues. The solution is to remove those directories before running `charmcraft pack`.
-```shell
-cd /path/to/repository
-rm -rf .tox venv
-```
-
-## Deploy the charm
-
-Deploy the charm after the build step with the following command:
 ```shell
 juju switch microk8s:datahub-k8s
-cd /path/to/charm/dir
 
-# Create a secret for encryption keys
-echo -e "gms-key: $GMS_SECRET\nfrontend-key: $FE_SECRET" > /path/to/secret.yaml
-juju add-secret <secret-name> --file=/path/to/secret.yaml  # copy the ID from the output
+# Create a Juju secret with random encryption keys
+make create-secret  # copy the secret ID from the output
 
-# Deploy
-juju deploy ./datahub-k8s_ubuntu-22.04-amd64.charm \
---resource datahub-actions=acryldata/datahub-actions:v0.0.15 \
---resource datahub-frontend=acryldata/datahub-frontend-react:v0.13.3 \
---resource datahub-gms=acryldata/datahub-gms:v0.13.3 \
---resource datahub-opensearch-setup=acryldata/datahub-elasticsearch-setup:v0.13.3 \
---resource datahub-kafka-setup=acryldata/datahub-kafka-setup:v0.13.3 \
---resource datahub-postgresql-setup=acryldata/datahub-postgres-setup:v0.13.3 \
---resource datahub-upgrade=acryldata/datahub-upgrade:v0.13.3 \
---config encryption-keys-secret-id=<secret-id>
+# Deploy with local resources (pass the secret ID from the previous step)
+make deploy-local SECRET_ID=<secret-id>
 
 # Grant secret
-juju grant-secret <secret-name> datahub-k8s
+juju grant-secret datahub-encryption-keys datahub-k8s
+```
+
+You can also customise the secret name:
+```shell
+make create-secret SECRET_NAME=my-custom-name
 ```
 
 **Note:** The configuration variables need to be set at deployment time and they should not be changed afterwards. DataHub expects these secrets to be secure, so ensure you have a secret with sufficient entropy. Future updates will make QoL changes here to make this easier to manage.
@@ -178,79 +295,3 @@ juju integrate datahub-k8s os-client
 After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on `localhost:9002` with `datahub` for the username and the password fetched as described in the [README](./README.md#deploying-datahub). Refer to [below](#accessing-datahub-from-the-host-machine) on how to connect to a `datahub` deployment inside a `multipass` VM.
 
 **Note:** If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not load. This is best identified by the requests to `/graphql` returning a `500`.
-
-## Iterating on the charm
-
-You can use `juju refresh` as follows to avoid having to re-do relations between changes to the charm:
-```shell
-juju switch microk8s:datahub-k8s
-cd /path/to/charm/dir
-juju refresh --path=./datahub-k8s_ubuntu-22.04-amd64.charm datahub-k8s
-```
-
-Sometimes, it is required to re-deploy the application. For faster iteration do the following:
-```shell
-juju switch microk8s:datahub-k8s
-juju remove-application datahub-k8s --force
-watch -n2 "kubectl -n datahub-k8s get pod"  # wait until 'datahub-k8s' is 'Terminating'
-kubectl -n datahub-k8s delete pod --force --grade-period=0 datahub-k8s-0  # pod name is prone to change
-watch -n2 "kubectl -n datahub-k8s get pod"  # make sure 'datahub-k8s' is gone and wait a few seconds
-# Re-deploy and re-integrate
-juju deploy ...
-```
-
-## Accessing DataHub from the host machine
-
-The recommended setup deploys DataHub inside of a VM. Which requires extra work to make it accessible from the host machine where you would have your browser. We can solve this with a few steps.
-
-First, get the IP address of your `multipass` instance, run this on the host:
-```shell
-❯ multipass info charm-dev
-Name:           charm-dev
-State:          Running
-Snapshots:      0
-IPv4:           10.150.222.16
-                10.214.223.1
-                10.1.157.64
-Release:        Ubuntu 22.04.4 LTS
-Image hash:     578ec657151d (Ubuntu 22.04 LTS)
-CPU(s):         4
-Load:           0.79 0.54 0.49
-Disk usage:     41.0GiB out of 48.4GiB
-Memory usage:   8.9GiB out of 15.6GiB
-Mounts:         /home/user/Workspaces => ~/Workspaces
-                    UID map: 1000:default
-                    GID map: 1000:default
-```
-
-We are interested in the first IP address in the list, in this case `10.150.222.16`.
-
-Second, get the IP address of your `datahub` application, run this in the `multipass` instance:
-```shell
-ubuntu@charm-dev:~$ juju status
-Model        Controller  Cloud/Region        Version  SLA          Timestamp
-datahub-k8s  microk8s    microk8s/localhost  3.5.3    unsupported  12:41:52+03:00
-
-SAAS       Status  Store  URL
-os-client  active  lxd    admin/datahub-vm.os-client
-pg-client  active  lxd    admin/datahub-vm.pg-client
-
-App            Version  Status  Scale  Charm          Channel   Rev  Address         Exposed  Message
-datahub-k8s             active      1  datahub-k8s               28  10.152.183.245  no
-kafka-k8s               active      1  kafka-k8s      3/stable   56  10.152.183.120  no
-zookeeper-k8s           active      1  zookeeper-k8s  3/stable   51  10.152.183.26   no
-
-Unit              Workload  Agent  Address      Ports  Message
-datahub-k8s/0*    active    idle   10.1.157.75
-kafka-k8s/0*      active    idle   10.1.157.87
-zookeeper-k8s/0*  active    idle   10.1.157.79
-```
-
-We are interested in the address of `datahub-k8s`, in this case `10.152.183.245`.
-
-Third, on the host machine route IPs:
-```shell
-sudo ip route add 10.152.183.0/24 via 10.150.222.16  # replace the last IP address with the address from the first step
-```
-
-This change will persist until reboot. Now, you can go into your browser with the address of the `datahub-k8s` application such as `10.152.183.245:9002` and access DataHub.
