@@ -366,9 +366,9 @@ class FrontendService(AbstractService):
             "KAFKA_PRODUCER_COMPRESSION_TYPE": "none",
             "KAFKA_PRODUCER_MAX_REQUEST_SIZE": "5242880",
             "KAFKA_CONSUMER_MAX_PARTITION_FETCH_BYTES": "5242880",
-            "SPRING_KAFKA_PROPERTIES_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
-            "SPRING_KAFKA_PROPERTIES_SASL_MECHANISM": "SCRAM-SHA-512",
-            "SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG": (
+            "KAFKA_PROPERTIES_SECURITY_PROTOCOL": "SASL_PLAINTEXT",
+            "KAFKA_PROPERTIES_SASL_MECHANISM": "SCRAM-SHA-512",
+            "KAFKA_PROPERTIES_SASL_JAAS_CONFIG": (
                 "org.apache.kafka.common.security.scram.ScramLoginModule required "
                 f'username="{kafka_conn["username"]}" password="{kafka_conn["password"]}";'
             ),
@@ -397,7 +397,7 @@ class FrontendService(AbstractService):
         if os.getenv("JUJU_CHARM_NO_PROXY"):
             no_proxy_hosts.extend(str(os.getenv("JUJU_CHARM_NO_PROXY")).split(","))
         if env.get("DATAHUB_GMS_HOST"):
-            no_proxy_hosts.extend(env["DATAHUB_GMS_HOST"])
+            no_proxy_hosts.append(env["DATAHUB_GMS_HOST"])
 
         if http_proxy_raw := os.getenv("JUJU_CHARM_HTTP_PROXY"):
             http_proxy = urlparse(http_proxy_raw)
