@@ -295,3 +295,10 @@ juju integrate datahub-k8s os-client
 After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on `localhost:9002` with `datahub` for the username and the password fetched as described in the [README](./README.md#deploying-datahub). Refer to [below](#accessing-datahub-from-the-host-machine) on how to connect to a `datahub` deployment inside a `multipass` VM.
 
 **Note:** If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not load. This is best identified by the requests to `/graphql` returning a `500`.
+
+**Note:** The GMS container uses `runner.sh` to execute initialization scripts (PostgreSQL setup, OpenSearch index creation, schema migration). The runner duplexes all output to log files under `/tmp` in the `datahub-gms` container. If an initialization step fails, you can list and read the logs with:
+```shell
+kubectl -n <namespace> exec -c datahub-gms datahub-k8s-0 -- ls /tmp
+kubectl -n <namespace> exec -c datahub-gms datahub-k8s-0 -- cat /tmp/<log-file>
+```
+Environment variables used during each run are also saved alongside the logs as `.env` files.

@@ -14,5 +14,5 @@ jobs:
     uses: canonical/operator-workflows/.github/workflows/integration_test.yaml@main
     secrets: inherit
     with:
-      runs-on: "['self-hosted', 'linux', 'X64', 'jammy', 'xlarge']"
+      runs-on: "self-hosted-linux-amd64-noble-xlarge"
       provider: microk8s
