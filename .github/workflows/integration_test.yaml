@@ -15,4 +15,7 @@ jobs:
     secrets: inherit
     with:
       runs-on: "self-hosted-linux-amd64-noble-xlarge"
-      provider: microk8s
+      channel: "1.34-strict/stable"
+      juju-channel: "3/stable"
+      trivy-severity-config: CRITICAL
+      modules: '["test_charm.py"]'

@@ -149,9 +149,6 @@ class TestDeployment:
         k8s_model = await helpers.ensure_model(label, ops_test, "microk8s", "k8s")
         lxd_model = await helpers.ensure_model(label, ops_test, "localhost", "lxd")
 
-        with ops_test.model_context(k8s_model):
-            await helpers.deploy_charm(ops_test, charm, rock_resources)
-
         with ops_test.model_context(lxd_model):
             async with ops_test.fast_forward():
                 # Deploy dependencies
@@ -243,7 +240,7 @@ class TestDeployment:
             async with ops_test.fast_forward(fast_interval="5m"):
                 # Deploy DataHub
                 logger.info("Deploying '%s'", helpers.APP_NAME)
-                await helpers.deploy_charm(ops_test, charm)
+                await helpers.deploy_charm(ops_test, charm, rock_resources)
 
                 # TODO (mertalpt): Find a way to avoid doing this.
                 # Gives `pebble_ready` time to run before making relations.
