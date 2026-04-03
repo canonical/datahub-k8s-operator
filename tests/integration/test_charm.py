@@ -125,8 +125,8 @@ async def _get_password(model_name: str) -> str:  # noqa C901
 class TestDeployment:
     """Integration tests for DataHub deployment."""
 
-    @pytest.mark.usefixtures("charm")
-    async def test_build_and_deploy_solo(self, ops_test: OpsTest, charm: Path):
+    @pytest.mark.usefixtures("charm", "rock_resources")
+    async def test_build_and_deploy_solo(self, ops_test: OpsTest, charm: Path, rock_resources: dict):
         """Build the charm-under-test and deploy it by itself.
 
         Assert on the unit status before any relations/configurations take place.
@@ -136,13 +136,13 @@ class TestDeployment:
         label = "deploy-solo"
         k8s_model = await helpers.ensure_model(label, ops_test, "microk8s", "k8s")
         with ops_test.model_context(k8s_model):
-            await helpers.deploy_charm(ops_test, charm)
+            await helpers.deploy_charm(ops_test, charm, rock_resources)
             await ops_test.model.wait_for_idle(apps=[helpers.APP_NAME], status="blocked", timeout=1000)
 
     # TODO (mertalpt): Implement the following to avoid having to use an `xlarge` runner.
     # https://github.com/canonical/opensearch-operator/blob/2/edge/tests/integration/helpers.py#L149
-    @pytest.mark.usefixtures("charm")
-    async def test_deploy_full(self, ops_test: OpsTest, charm: Path):
+    @pytest.mark.usefixtures("charm", "rock_resources")
+    async def test_deploy_full(self, ops_test: OpsTest, charm: Path, rock_resources: dict):
         """Build the charm-under-test and deploy it with the entire ecosystem."""
         # Setup
         label = "full-deploy"
@@ -240,7 +240,7 @@ class TestDeployment:
             async with ops_test.fast_forward(fast_interval="5m"):
                 # Deploy DataHub
                 logger.info("Deploying '%s'", helpers.APP_NAME)
-                await helpers.deploy_charm(ops_test, charm)
+                await helpers.deploy_charm(ops_test, charm, rock_resources)
 
                 # TODO (mertalpt): Find a way to avoid doing this.
                 # Gives `pebble_ready` time to run before making relations.

@@ -1,0 +1,133 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: datahub-frontend
+base: bare
+build-base: ubuntu@22.04
+# DataHub versioning can go 4 levels deep.
+# We keep documentation to 3 levels, rest to 4 levels.
+version: '1.4.0.5'
+summary: "DataHub Actions 1.4.0 Rock"
+description: "OCI image for the Frontend component of DataHub."
+platforms:
+  amd64:
+
+run-user: _daemon_
+
+services:
+  datahub-frontend:
+    override: merge
+    command: "/start.sh"
+    on-check-failure:
+      up: ignore
+    environment:
+      JMX_VERSION: "0.20.0"
+      LD_LIBRARY_PATH: "/lib:/lib64"
+      OTEL_EXPORTER_OTLP_MAX_PAYLOAD_SIZE: "4194304"
+      OTEL_EXPORTER_OTLP_HTTP_HTTP2_MAX_FRAME_SIZE: "16777215"
+      OTEL_EXPORTER_OTLP_HTTP_COMPRESSION: "gzip"
+      OTEL_EXPORTER_OTLP_TRACES_COMPRESSION: "gzip"
+      SERVER_PORT: "9002"
+      MFE_CONFIG_FILE_PATH: "/datahub-frontend/conf/mfe.config.dev.yaml"
+
+checks:
+  up:
+    override: merge
+    threshold: 4
+    http:
+      url: "http://localhost:9002/admin"
+
+parts:
+  # ---- Metadata ----
+  # Also, script files need minor rewriting to use
+  # bash and refer to files in their new locations.
+  rock-source:
+    plugin: dump
+    source: .
+    organize:
+      rockcraft.yaml: rockcraft.yaml
+      files/start.sh: start.sh
+    stage:
+      - rockcraft.yaml
+      - start.sh
+
+  # Clone DataHub at v1.4.0 and build the frontend distribution.
+  # Only the four artifact groups required at runtime are copied into
+  # CRAFT_PART_INSTALL; the Gradle cache, source tree, and JDK are
+  # excluded from the final image automatically.
+  datahub-frontend-build:
+    plugin: nil
+    after:
+      - rock-source
+    source: https://github.com/acryldata/datahub.git
+    source-tag: v1.4.0.5
+    source-depth: 1
+    source-type: git
+    build-packages:
+      - openjdk-17-jdk-headless
+      - git
+      - python3.11
+      - python3.11-dev
+      - python3.11-venv
+    override-build: |
+      # Ensure python points to python3.11
+      ln -sf /usr/bin/python3.11 /usr/bin/python
+
+      ./gradlew :datahub-frontend:dist -x yarnTest -x yarnLint
+
+      # Built application (contents of build/stage/main → /datahub-frontend/)
+      mkdir -p "${CRAFT_PART_INSTALL}/datahub-frontend/conf"
+      cp -r datahub-frontend/build/stage/main/* \
+        "${CRAFT_PART_INSTALL}/datahub-frontend/"
+
+      # MFE config files (source tree → /datahub-frontend/conf/)
+      cp datahub-frontend/conf/mfe.*.yaml \
+        "${CRAFT_PART_INSTALL}/datahub-frontend/conf/"
+
+      # Prometheus client config
+      cp docker/monitoring/client-prometheus-config.yaml \
+        "${CRAFT_PART_INSTALL}/datahub-frontend/"
+
+  # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  opentelemetry-agent:
+    plugin: dump
+    source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
+    source-type: file
+    source-checksum: sha256/7ecffb5fdda5d2e0fd0125abaffa218146a23dc2402d5c7b30cf5a2f2c3ff241
+    organize:
+      opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
+
+  # JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  jmx-prometheus-agent:
+    plugin: dump
+    source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
+    source-type: file
+    source-checksum: sha256/8b67ed40485d475648c36d11d21464b484406f85faf912b3363f71a6a7861320
+    organize:
+      jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
+
+  # Runtime dependencies for the bare-base image.
+  # apt resolves the full transitive closure; prime exclusions strip
+  # documentation and JDK source to minimise final image size.
+  runtime-packages:
+    plugin: nil
+    stage-packages:
+      - base-files
+      # Do not remove without finding a way to execute the scripts under `files`!
+      - bash
+      - dash
+      - ca-certificates
+      - curl
+      - findutils
+      - sed
+      - libc6
+      - libsnappy1v5
+      - libsqlite3-0
+      - openjdk-17-jre-headless
+    prime:
+      - -usr/share/doc
+      - -usr/share/man
+      - -usr/share/lintian
+      - -usr/share/bug
+      - -usr/share/info
+      - -usr/lib/jvm/java-17-openjdk-amd64/lib/src.zip

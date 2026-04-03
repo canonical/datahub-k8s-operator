@@ -34,6 +34,7 @@ header:
     - 'LICENSE'
     - 'trivy.yaml'
     - 'lib/**'
-    - 'src/files/executor.yaml'
-    - 'src/scripts/**'
+    - 'datahub_rocks/actions/files/**'
+    - 'datahub_rocks/frontend/files/**'
+    - 'datahub_rocks/gms/files/**'
   comment: on-failure

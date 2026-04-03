@@ -14,3 +14,8 @@ def pytest_addoption(parser: pytest.Parser):
     """
     # The prebuilt charm file.
     parser.addoption("--charm-file", action="append", default=[])
+
+    # Locally built rock OCI resources.
+    parser.addoption("--datahub-actions-image", action="store")
+    parser.addoption("--datahub-frontend-image", action="store")
+    parser.addoption("--datahub-gms-image", action="store")
