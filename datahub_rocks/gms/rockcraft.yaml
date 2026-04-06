@@ -1,0 +1,184 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: datahub-gms
+base: bare
+build-base: ubuntu@22.04
+# DataHub versioning can go 4 levels deep.
+# We keep documentation to 3 levels, rest to 4 levels.
+version: '1.4.0.5'
+summary: "DataHub GMS 1.4.0 Rock"
+description: "OCI image for the Generalized Metadata Service (GMS) component of DataHub, bundling upgrade, postgres-setup, and elasticsearch-setup scripts."
+platforms:
+  amd64:
+
+run-user: _daemon_
+
+services:
+  datahub-gms:
+    override: merge
+    command: "/datahub/datahub-gms/scripts/start.sh"
+    on-check-failure:
+      up: ignore
+    environment:
+      JMX_VERSION: "0.20.0"
+      LD_LIBRARY_PATH: "/lib:/lib64"
+      OTEL_EXPORTER_OTLP_MAX_PAYLOAD_SIZE: "4194304"
+      OTEL_EXPORTER_OTLP_HTTP_HTTP2_MAX_FRAME_SIZE: "8388608"
+      OTEL_EXPORTER_OTLP_HTTP_COMPRESSION: "gzip"
+      OTEL_EXPORTER_OTLP_TRACES_COMPRESSION: "gzip"
+
+checks:
+  up:
+    override: merge
+    threshold: 4
+    http:
+      url: "http://localhost:8080/health"
+
+parts:
+  # ---- Metadata ----
+  # Also, script files need minor rewriting to use
+  # bash and refer to files in their new locations.
+  rock-source:
+    plugin: dump
+    source: .
+    organize:
+      files/create-indices.sh: datahub/elasticsearch-setup/create-indices.sh
+      files/init.sh: datahub/postgres-setup/init.sh
+      files/start.sh: datahub/datahub-gms/scripts/start.sh
+      files/runner.sh: charm-scripts/runner.sh
+      rockcraft.yaml: rockcraft.yaml
+    stage:
+      - datahub/elasticsearch-setup/create-indices.sh
+      - datahub/postgres-setup/init.sh
+      - datahub/datahub-gms/scripts/start.sh
+      - charm-scripts/runner.sh
+      - rockcraft.yaml
+
+  # Clone DataHub at v1.4.0, Gradle-build the GMS WAR and
+  # Upgrade JAR, then collect all scripts, configs, and init files
+  # required at runtime.
+  datahub-build:
+    plugin: nil
+    after:
+      - rock-source
+    source: https://github.com/acryldata/datahub.git
+    source-commit: 32b131fa42c03893a329fe8b0075b14cdac7ce0b # v1.4.0.5
+    source-depth: 1
+    source-type: git
+    build-packages:
+      - openjdk-17-jdk-headless
+      - git
+      - python3.11
+      - python3.11-dev
+      - python3.11-venv
+    override-build: |
+      set -eu
+
+      # Ensure python points to python3.11
+      ln -sf /usr/bin/python3.11 /usr/bin/python
+
+      # ── Gradle build ────────────────────────────────────────────────
+      ./gradlew :metadata-service:war:build :datahub-upgrade:build \
+        -x test -x yarnTest -x yarnLint
+
+      # ── GMS artifacts ───────────────────────────────────────────────
+      install -Dm644 metadata-service/war/build/libs/war.war \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/bin/war.war"
+
+      install -Dm755 "${CRAFT_STAGE}/datahub/datahub-gms/scripts/start.sh" \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/scripts/start.sh"
+
+      install -Dm644 docker/monitoring/client-prometheus-config.yaml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/scripts/prometheus-config.yaml"
+
+      install -Dm644 metadata-models/src/main/resources/entity-registry.yml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/resources/entity-registry.yml"
+
+      # Directory expected by GMS at runtime
+      mkdir -p "${CRAFT_PART_INSTALL}/etc/datahub/plugins/auth/resources"
+
+      # ── Upgrade artifacts ───────────────────────────────────────────
+      install -Dm644 datahub-upgrade/build/libs/datahub-upgrade.jar \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-upgrade/bin/datahub-upgrade.jar"
+
+      install -Dm755 docker/datahub-upgrade/start.sh \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-upgrade/scripts/start.sh"
+
+      install -Dm644 docker/monitoring/client-prometheus-config.yaml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-upgrade/scripts/prometheus-config.yaml"
+
+      # Entity registry is also referenced by the upgrade container
+      install -Dm644 metadata-models/src/main/resources/entity-registry.yml \
+        "${CRAFT_PART_INSTALL}/datahub/datahub-gms/resources/entity-registry.yml"
+
+      # ── PostgreSQL setup artifacts ──────────────────────────────────
+      install -Dm755 "${CRAFT_STAGE}/datahub/postgres-setup/init.sh" \
+        "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init.sh"
+      install -Dm644 docker/postgres-setup/init.sql \
+        "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init.sql"
+      install -Dm644 docker/postgres-setup/init-cdc.sql \
+        "${CRAFT_PART_INSTALL}/datahub/postgres-setup/init-cdc.sql"
+
+      # ── Elasticsearch/OpenSearch setup artifacts ────────────────────
+      install -Dm755 "${CRAFT_STAGE}/datahub/elasticsearch-setup/create-indices.sh" \
+        "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/create-indices.sh"
+      mkdir -p "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/index"
+      cp -r metadata-service/restli-servlet-impl/src/main/resources/index/* \
+        "${CRAFT_PART_INSTALL}/datahub/elasticsearch-setup/index/"
+
+      # ── Kafka truststore ────────────────────────────────────────────
+      # Copy the JRE cacerts as the default Kafka client truststore,
+      # matching the upstream Dockerfile convention.
+      CACERTS="/usr/lib/jvm/java-17-openjdk-amd64/lib/security/cacerts"
+      install -Dm644 "${CACERTS}" \
+        "${CRAFT_PART_INSTALL}/tmp/kafka.client.truststore.jks"
+
+  # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  opentelemetry-agent:
+    plugin: dump
+    source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
+    source-type: file
+    source-checksum: sha256/7ecffb5fdda5d2e0fd0125abaffa218146a23dc2402d5c7b30cf5a2f2c3ff241
+    organize:
+      opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
+
+  # JMX Prometheus exporter agent, placed at / per upstream Dockerfile.
+  jmx-prometheus-agent:
+    plugin: dump
+    source: https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar
+    source-type: file
+    source-checksum: sha256/8b67ed40485d475648c36d11d21464b484406f85faf912b3363f71a6a7861320
+    organize:
+      jmx_prometheus_javaagent-0.20.0.jar: jmx_prometheus_javaagent.jar
+
+  # Runtime dependencies for the bare-base image.
+  # Provides the JRE, C library, and CLI tools required at runtime.
+  # postgresql-client provides psql.
+  # curl, jq, grep, sed are explicitly included.
+  # coreutils provides base64 and tee.
+  runtime-packages:
+    plugin: nil
+    stage-packages:
+      - base-files
+      # Do not remove without finding a way to execute the scripts under `files`!
+      - bash
+      - dash
+      - coreutils
+      - grep
+      - sed
+      - ca-certificates
+      - curl
+      - libc6
+      - libsnappy1v5
+      - libsqlite3-0
+      - openjdk-17-jre-headless
+      - postgresql-client
+      - jq
+    prime:
+      - -usr/share/doc
+      - -usr/share/man
+      - -usr/share/lintian
+      - -usr/share/bug
+      - -usr/share/info
+      - -usr/lib/jvm/java-17-openjdk-amd64/lib/src.zip

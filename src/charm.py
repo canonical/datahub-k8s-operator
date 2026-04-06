@@ -9,6 +9,7 @@ import secrets
 from typing import Dict, List, Type, Union
 
 import ops
+import yaml
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
     KafkaRequires,
@@ -16,7 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
 from charms.nginx_ingress_integrator.v0.nginx_route import require_nginx_route
-from ops.pebble import CheckStatus
+from ops.pebble import CheckStatus, PathError
 
 import exceptions
 import literals
@@ -34,10 +35,6 @@ logger = logging.getLogger(__name__)
 
 # Ordering of services has the function of setting the initialization priority.
 SERVICES: List[Type[services.AbstractService]] = [
-    services.PostgresqlSetupService,
-    services.KafkaSetupService,
-    services.OpensearchSetupService,
-    services.UpgradeService,
     services.GMSService,
     services.FrontendService,
     services.ActionsService,
@@ -165,14 +162,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: Event instance being handled.
         """
-        # Actions service requires a file to be altered at startup.
-        if event.workload.name == services.ActionsService.name:
-            utils.push_file(
-                event.workload,
-                ("src", "files", "executor.yaml"),
-                "/etc/datahub/actions/system/conf/executor.yaml",
-                0o644,
-            )
         # Frontend service requires a file to be present at startup.
         if event.workload.name == services.FrontendService.name:
             self._state.frontend_truststore_initialized = False
@@ -189,6 +178,19 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             )
         if event.workload.name == services.GMSService.name:
             self._state.gms_truststore_initialized = False
+            try:
+                container = self.unit.get_container(services.GMSService.name)
+                if not container.can_connect():
+                    raise ValueError(f"Cannot connect to {services.GMSService.name}")
+                meta_file = container.pull("/rockcraft.yaml")
+                meta = yaml.safe_load(meta_file)
+                if meta and "version" in meta:
+                    self.unit.set_workload_version(meta["version"])
+                else:
+                    raise ValueError("Cannot find 'version' in 'rockcraft.yaml'.")
+            except (ops.ModelError, PathError, ValueError, yaml.YAMLError) as e:
+                logger.info("Could not get workload version: %s", str(e))
+                event.defer()
 
         self._update(event)
 
@@ -204,9 +206,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return
 
         context = services.ServiceContext(self)
-        service = services.UpgradeService
+        service = services.GMSService
         if not service.is_ready(context):
-            event.fail("upgrade service is not ready")
+            event.fail("GMS service is not ready")
             return
 
         container = self.unit.get_container(service.name)

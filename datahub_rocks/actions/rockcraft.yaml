@@ -1,0 +1,225 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: datahub-actions
+base: bare
+build-base: ubuntu@22.04
+# DataHub versioning can go 4 levels deep.
+# We keep documentation to 3 levels, rest to 4 levels.
+version: '1.4.0.5'
+summary: "DataHub Actions 1.4.0 Rock"
+description: "OCI image for the Actions component of DataHub."
+platforms:
+  amd64:
+
+run-user: _daemon_
+
+services:
+  datahub-actions:
+    override: merge
+    command: "/start_datahub_actions.sh"
+    environment:
+      VIRTUAL_ENV: "/opt/datahub/venv"
+      PATH: "/opt/datahub/venv/bin:/usr/bin:/bin"
+      HOME: "/home/datahub"
+      REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
+      SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt"
+      DATAHUB_ACTIONS_SYSTEM_CONFIGS_PATH: "/etc/datahub/actions/system/conf"
+      DATAHUB_BUNDLED_VENV_PATH: "/opt/datahub/venvs"
+
+parts:
+  # ---- Metadata ----  
+  rock-source:
+    plugin: dump
+    source: .
+    organize:
+      rockcraft.yaml: rockcraft.yaml
+    stage:
+      - rockcraft.yaml
+
+  # Clone DataHub v1.4.0, build the primary virtualenv with
+  # datahub-actions + metadata-ingestion, create bundled ingestion venvs
+  # for the selected plugins, and stage scripts + config.
+  datahub-actions-build:
+    plugin: nil
+    source: https://github.com/acryldata/datahub.git
+    source-commit: 32b131fa42c03893a329fe8b0075b14cdac7ce0b # v1.4.0.5
+    source-depth: 1
+    source-type: git
+    build-snaps:
+      - astral-uv
+    build-packages:
+      - build-essential
+      - gcc
+      - g++
+      - git
+      - libldap2-dev
+      - libsasl2-dev
+      - libkrb5-dev
+      - librdkafka-dev
+      - unixodbc-dev
+      - libffi-dev
+      - libssl-dev
+      - python3.11
+      - python3.11-dev
+      - python3.11-venv
+    build-environment:
+      - UV_BUILD_CONSTRAINT: "${CRAFT_PART_SRC}/metadata-ingestion/build-constraints.txt"
+    override-build: |
+      set -eu
+
+      # Ensure python points to python3.11
+      ln -sf /usr/bin/python3.11 /usr/bin/python
+
+      RELEASE_VERSION="1.4.0.5"
+
+      # Patch version strings so installed packages report 1.4.0
+      python3.11 python-build/version_updater.py \
+        --directory ./datahub-actions/ \
+        --version "${RELEASE_VERSION}" --expected-update-count 1
+
+      # ── Primary virtualenv ──────────────────────────────────────────
+      uv venv --python python3.11 --clear /opt/datahub/venv
+      export VIRTUAL_ENV="/opt/datahub/venv"
+      export PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+      # Install acryl-datahub from PyPI (includes pre-generated metadata
+      # models that are absent from the git source tree).
+      uv pip install "acryl-datahub[base,s3-slim,gcs-slim,abs-slim]==${RELEASE_VERSION}"
+      uv pip install \
+        './datahub-actions/[kafka,executor,slack,teams,tag_propagation,term_propagation,doc_propagation,observability]'
+
+      # ── Bundled ingestion venvs ─────────────────────────────────────
+      BUNDLED_VENV_PATH="/opt/datahub/venvs"
+      mkdir -p "${BUNDLED_VENV_PATH}"
+      cp docker/snippets/ingestion/constraints.txt "${BUNDLED_VENV_PATH}/"
+
+      for plugin in s3 postgres kafka trino hive dbt superset elasticsearch; do
+        venv="${BUNDLED_VENV_PATH}/${plugin}-bundled"
+        echo "==> Creating bundled venv: ${plugin}-bundled"
+        uv venv --python python3.11 --clear "${venv}"
+
+        # Use the -slim variant for s3 (avoids pulling in PySpark)
+        extra="${plugin}"
+        [ "${plugin}" = "s3" ] && extra="s3-slim"
+
+        bash -c "source ${venv}/bin/activate && \
+          uv pip install \
+            \"acryl-datahub[datahub-rest,datahub-kafka,file,${extra}]==${RELEASE_VERSION}\" \
+            --constraints ${BUNDLED_VENV_PATH}/constraints.txt"
+        echo "==> Done: ${plugin}-bundled"
+      done
+
+      # ── Fix Python symlinks for bare-base compatibility ─────────────
+      # uv venv creates symlinks back to the system Python, which does
+      # not exist at runtime in a bare-base image.  Replace them with
+      # copies of the real binary so the venvs are self-contained.
+      real_python="$(readlink -f /opt/datahub/venv/bin/python)"
+      for venv_bin in /opt/datahub/venv/bin /opt/datahub/venvs/*/bin; do
+        [ -d "${venv_bin}" ] || continue
+        for link in python python3 python3.11; do
+          [ -L "${venv_bin}/${link}" ] && rm "${venv_bin}/${link}"
+        done
+        cp "${real_python}" "${venv_bin}/python"
+        ln -s python "${venv_bin}/python3"
+        ln -s python "${venv_bin}/python3.11"
+      done
+
+      # ── Collect artefacts ───────────────────────────────────────────
+      mkdir -p "${CRAFT_PART_INSTALL}/opt/datahub"
+      cp -a /opt/datahub/venv  "${CRAFT_PART_INSTALL}/opt/datahub/venv"
+      cp -a /opt/datahub/venvs "${CRAFT_PART_INSTALL}/opt/datahub/venvs"
+
+      # Startup script
+      install -m 755 docker/datahub-actions/start.sh \
+        "${CRAFT_PART_INSTALL}/start_datahub_actions.sh"
+
+      # Default action configs (executor.yaml, etc.)
+      mkdir -p "${CRAFT_PART_INSTALL}/etc/datahub/actions/system/conf"
+      cp docker/datahub-actions/config/* \
+        "${CRAFT_PART_INSTALL}/etc/datahub/actions/system/conf/"
+
+      # Directories expected by start.sh at runtime (world-writable for
+      # compatibility with the _daemon_ run-user)
+      mkdir -p "${CRAFT_PART_INSTALL}/tmp/datahub/logs/actions/system"
+      chmod -R 777 "${CRAFT_PART_INSTALL}/tmp/datahub"
+      mkdir -p "${CRAFT_PART_INSTALL}/home/datahub"
+      chmod 777 "${CRAFT_PART_INSTALL}/home/datahub"
+      mkdir -p "${CRAFT_PART_INSTALL}/etc/datahub/actions/conf"
+    stage:
+      - -etc/datahub/actions/system/conf/executor.yaml
+
+  # Part 2: uv binary for runtime use (ingestion executor).
+  # The astral-uv snap binary has its ELF interpreter patched to
+  # snap-specific paths that do not exist in a bare-base rock.
+  # Instead, use the official musl (statically linked) release
+  # that runs on any Linux without external library dependencies.
+  uv-runtime:
+    plugin: dump
+    source: https://github.com/astral-sh/uv/releases/download/0.11.1/uv-x86_64-unknown-linux-musl.tar.gz
+    source-type: tar
+    source-checksum: sha256/4e949471a95b37088a1ff1a585f69abed4d3cd3f921f50709a46b6ba62986d38
+    organize:
+      uv: usr/bin/uv
+      uvx: usr/bin/uvx
+    stage:
+      - usr/bin/uv
+      - usr/bin/uvx
+    prime:
+      - usr/bin/uv
+      - usr/bin/uvx
+
+  # Part 3: Charm-managed executor config baked into the image.
+  # Overwrites the upstream executor.yaml with a Juju-compatible version.
+  charm-executor-config:
+    plugin: dump
+    source: .
+    after:
+      - datahub-actions-build
+    organize:
+      files/executor.yaml: etc/datahub/actions/system/conf/executor.yaml
+    prime:
+      - etc/datahub/actions/system/conf/executor.yaml
+
+  # Part 4: Generate the combined CA-certificates bundle.
+  # The ca-certificates stage-package provides individual PEM files but the
+  # combined /etc/ssl/certs/ca-certificates.crt is normally created by
+  # update-ca-certificates, which does not run during rockcraft extraction.
+  generate-ca-bundle:
+    plugin: nil
+    after:
+      - runtime-packages
+    override-build: |
+      mkdir -p "${CRAFT_PART_INSTALL}/etc/ssl/certs"
+      cat "${CRAFT_STAGE}"/usr/share/ca-certificates/mozilla/*.crt > \
+        "${CRAFT_PART_INSTALL}/etc/ssl/certs/ca-certificates.crt"
+
+  # Part 5: Runtime dependencies for the bare-base image.
+  # Provides the C library, Python 3.11 stdlib, and shared libraries
+  # required by native Python extension modules at runtime.
+  runtime-packages:
+    plugin: nil
+    stage-packages:
+      - base-files
+      - bash
+      - dash
+      - coreutils
+      - ca-certificates
+      - curl
+      - libc6
+      - libpython3.11-minimal
+      - libpython3.11-stdlib
+      - libsasl2-2
+      - libsasl2-modules
+      - libsasl2-modules-gssapi-mit
+      - libkrb5-3
+      - libgssapi-krb5-2
+      - unixodbc
+      - libexpat1
+      - libsqlite3-0
+    prime:
+      - -usr/share/doc
+      - -usr/share/man
+      - -usr/share/lintian
+      - -usr/share/bug
+      - -usr/share/info

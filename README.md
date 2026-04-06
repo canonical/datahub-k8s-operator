@@ -1,12 +1,17 @@
 # DataHub K8s Operator
 
-This is the Kubernetes operator for [DataHub](https://datahubproject.io/).
+This is the Kubernetes operator for [DataHub](https://datahubproject.io/), available on [Charmhub](https://charmhub.io/datahub-k8s).
 
 ## Description
 
 DataHub is an extensible data catalog that enables data discovery, data observability and federated data governance.
 
-This operator provides DataHub services on Kubernetes and consists of Python scripts which wrap the [distributions](https://hub.docker.com/u/acryldata) from DataHub.
+### Architecture
+
+The charm manages three containers:
+- **datahub-gms**: The Generalized Metadata Service. Serves as the backend API, handling metadata storage, retrieval, and search.
+- **datahub-frontend**: The web UI. Provides the browser-based interface for data discovery and governance.
+- **datahub-actions**: The event processing framework. Handles asynchronous tasks such as notifications, metadata propagation, and ingestion.
 
 ## Usage
 
@@ -72,11 +77,10 @@ juju consume lxd:admin/datahub-vm.os-client os-client
 juju switch k8s:datahub-k8s
 
 # Create a secret for encryption keys
-echo "gms-key: $GMS_SECRET\nfrontend-key: $FE_SECRET\n" > /path/to/secret.yaml
-juju add-secret <secret-name> --file=/path/to/secret.yaml  # Copy the ID from the output
+juju add-secret <secret-name> gms-key=$GMS_SECRET frontend-key=$FE_SECRET  # Copy the ID from the output
 
 # Deploy
-juju deploy datahub-k8s --config encryption-key-secret-id=<secret-id>
+juju deploy datahub-k8s --channel latest/edge --config encryption-keys-secret-id=<secret-id>
 juju grant-secret <secret-name> datahub-k8s
 
 # Wait for the unit to settle
@@ -144,6 +148,49 @@ However, it is often easier and sometimes needed to rebuild search indices as ou
 
 ```bash
 juju run datahub-k8s/leader reindex
+```
+
+To delete existing indices before rebuilding, use the `clean` parameter:
+
+```bash
+juju run datahub-k8s/leader reindex clean=true
+```
+
+### Configuring Ingress
+
+The DataHub charm supports exposing the frontend and GMS services via [Nginx Ingress Integrator](https://charmhub.io/nginx-ingress-integrator).
+
+```sh
+juju deploy nginx-ingress-integrator --channel latest/edge --trust
+juju relate datahub-k8s:nginx-fe-route nginx-ingress-integrator
+```
+
+You can configure the external hostnames with:
+
+```sh
+juju config datahub-k8s external-fe-hostname=datahub.example.com
+juju config datahub-k8s external-gms-hostname=datahub-gms.example.com
+```
+
+To enable TLS, you can either create a Kubernetes TLS secret manually and pass its name to the charm:
+
+```sh
+juju config datahub-k8s tls-secret-name=<k8s-tls-secret-name>
+```
+
+Alternatively, you can use the [Lego](https://charmhub.io/lego) charm to automate certificate management via ACME providers such as Let's Encrypt.
+
+### Troubleshooting
+
+- **Opensearch offer blocked**: If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not work. This is best identified by requests to `/graphql` returning a `500` error. Ensure the offer is accepted on the provider side.
+- **Indices out of sync**: If search results are missing or stale after a migration or upgrade, rebuild the indices with `juju run datahub-k8s/leader reindex`.
+- **GMS initialization failure**: The GMS container runs several initialization scripts at startup (PostgreSQL setup, OpenSearch index creation, schema migration). Each script's output is logged to `/tmp` inside the `datahub-gms` container. To list available logs:
+```sh
+kubectl -n <namespace> exec -c datahub-gms datahub-k8s-0 -- ls /tmp
+```
+To inspect a specific log:
+```sh
+kubectl -n <namespace> exec -c datahub-gms datahub-k8s-0 -- cat /tmp/<log-file>
 ```
 
 ## Contributing
