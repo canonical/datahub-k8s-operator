@@ -201,7 +201,7 @@ class ActionsService(AbstractService):
     """
 
     name = "datahub-actions"
-    command = " /start_datahub_actions.sh"
+    command = "/start_datahub_actions.sh"
     healthcheck = None
 
     @classmethod
@@ -288,7 +288,7 @@ class FrontendService(AbstractService):
     """
 
     name = "datahub-frontend"
-    command = " /start.sh"
+    command = "/start.sh"
     healthcheck = {
         "endpoint": "/admin",
         "port": "9002",

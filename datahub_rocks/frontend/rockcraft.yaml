@@ -7,7 +7,7 @@ build-base: ubuntu@22.04
 # DataHub versioning can go 4 levels deep.
 # We keep documentation to 3 levels, rest to 4 levels.
 version: '1.4.0.5'
-summary: "DataHub Actions 1.4.0 Rock"
+summary: "DataHub Frontend 1.4.0 Rock"
 description: "OCI image for the Frontend component of DataHub."
 platforms:
   amd64:
@@ -60,7 +60,7 @@ parts:
     after:
       - rock-source
     source: https://github.com/acryldata/datahub.git
-    source-tag: v1.4.0.5
+    source-commit: 32b131fa42c03893a329fe8b0075b14cdac7ce0b # v1.4.0.5
     source-depth: 1
     source-type: git
     build-packages:

@@ -110,6 +110,22 @@ rm -rf .tox venv
 
 3. *Nothing to be done for rock*: Rock building targets watch for changes to the `rockcraft.yaml` file for deciding if they need to rebuild. If you need to change something else, e.g. scripts that go into the rocks, `touch rockcraft.yaml` to force a build.
 
+## Using commit hashes for upstream versions
+
+We use commit hashes instead of git tags in our `rockcraft.yaml` files. This is a security measure to ensure that upstream git tags cannot be updated to point to a malicious commit without our knowledge, which could lead to supply chain attacks. By pinning to the exact commit hash of a release tag, we ensure reproducibility and security.
+
+### How to update to a newer tag
+
+When updating the rocks to a newer version of DataHub (e.g. going from `v1.4.0.5` to `v1.4.1`):
+
+1. Find the commit hash for the new tag in the `acryldata/datahub` repository. You can do this by running:
+   ```shell
+   git ls-remote https://github.com/acryldata/datahub.git refs/tags/v1.4.1
+   ```
+2. In each `rockcraft.yaml`, update the `source-commit` field to the new hash.
+3. Update the comment next to `source-commit` to reflect the new tag (e.g. `# v1.4.1`).
+4. Update other references to the version (such as `version` and `summary`) as necessary.
+
 ## Code quality
 
 You can run linters, static analysis, and unit tests with:

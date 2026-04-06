@@ -37,13 +37,13 @@ parts:
     stage:
       - rockcraft.yaml
 
-  # Part 1: Clone DataHub v1.4.0, build the primary virtualenv with
+  # Clone DataHub v1.4.0, build the primary virtualenv with
   # datahub-actions + metadata-ingestion, create bundled ingestion venvs
   # for the selected plugins, and stage scripts + config.
   datahub-actions-build:
     plugin: nil
     source: https://github.com/acryldata/datahub.git
-    source-tag: v1.4.0.5
+    source-commit: 32b131fa42c03893a329fe8b0075b14cdac7ce0b # v1.4.0.5
     source-depth: 1
     source-type: git
     build-snaps:
