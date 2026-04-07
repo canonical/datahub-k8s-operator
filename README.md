@@ -126,11 +126,30 @@ client-secret: <client-secret-value>
 11. Deploy DataHub with the added config variable `--config oidc-secret-id=<secret-id>`.
 12. Run `juju grant-secret <secret-name> datahub-k8s` to set permissions.
 13. Proceed with the relations.
-14. If your deployment is behind a HTTP proxy, set it on your Juju model via
+14. If your deployment is behind an HTTP proxy, configure model proxies as described in [Configuring Model Proxies](#configuring-model-proxies).
+
+### Configuring Model Proxies
+
+If your model runs in a restricted network, configure Juju model proxies so DataHub
+containers can reach external services (for example Python package indexes).
+
 ```sh
-juju model-config juju-http-proxy=<http-proxy-address>
-juju model-config juju-https-proxy=<http-proxy-address>
+juju model-config juju-http-proxy=http://proxy.example:8080
+juju model-config juju-https-proxy=http://proxy.example:8080
+juju model-config juju-no-proxy=127.0.0.1,localhost,.svc,.cluster.local
 ```
+
+Proxy propagation behavior in this charm:
+- `datahub-actions` receives standard proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and lowercase variants), which are used by Python tooling.
+- `datahub-frontend` receives its existing JVM proxy settings.
+
+To verify proxy variables on a container:
+
+```sh
+kubectl -n <namespace> exec -c <datahub-actions|datahub-frontend> datahub-k8s-0 -- pebble plan | grep -i '_proxy\|proxy'
+```
+
+After changing model proxy settings, allow one `update-status` cycle or trigger a new hook event (for example a config change) so the charm can refresh Pebble plans.
 
 ### Migrating Data
 

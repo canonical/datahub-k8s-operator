@@ -20,7 +20,7 @@ import abc
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urlparse
 
 import exceptions
@@ -113,6 +113,50 @@ def _kafka_topic_names(prefix: str) -> Dict[str, str]:
 
     names = {k: f"{prefix}_{v}" for (k, v) in default_names.items()}
     return names
+
+
+def _compile_standard_proxy_environment(extra_no_proxy_hosts: Optional[List[str]] = None) -> Dict[str, str]:
+    """Compile standard proxy variables from Juju charm proxy environment variables.
+
+    Args:
+        extra_no_proxy_hosts: Optional hostnames to append to NO_PROXY/no_proxy.
+
+    Returns:
+        Standard proxy variables suitable for Python tools.
+    """
+    proxy_vars: Dict[str, str] = {}
+    proxy_map = {
+        "JUJU_CHARM_HTTP_PROXY": ("HTTP_PROXY", "http_proxy"),
+        "JUJU_CHARM_HTTPS_PROXY": ("HTTPS_PROXY", "https_proxy"),
+    }
+
+    has_proxy_config = False
+    for juju_var, target_vars in proxy_map.items():
+        value = os.getenv(juju_var)
+        if not value:
+            continue
+        has_proxy_config = True
+        for target in target_vars:
+            proxy_vars[target] = value
+
+    juju_no_proxy = os.getenv("JUJU_CHARM_NO_PROXY")
+    if juju_no_proxy:
+        has_proxy_config = True
+
+    if has_proxy_config:
+        no_proxy_values: List[str] = []
+        if juju_no_proxy:
+            no_proxy_values.extend(host.strip() for host in juju_no_proxy.split(",") if host.strip())
+        if extra_no_proxy_hosts:
+            no_proxy_values.extend(host.strip() for host in extra_no_proxy_hosts if host and host.strip())
+
+        if no_proxy_values:
+            unique_no_proxy = list(dict.fromkeys(no_proxy_values))
+            no_proxy = ",".join(unique_no_proxy)
+            proxy_vars["NO_PROXY"] = no_proxy
+            proxy_vars["no_proxy"] = no_proxy
+
+    return proxy_vars
 
 
 @dataclass
@@ -275,6 +319,7 @@ class ActionsService(AbstractService):
         }
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
+        env.update(_compile_standard_proxy_environment(extra_no_proxy_hosts=["localhost", env["DATAHUB_GMS_HOST"]]))
         return env
 
 
