@@ -871,7 +871,7 @@ class GMSService(AbstractService):
                 ],
                 encoding="utf-8",
                 environment=environment,
-                timeout=180,
+                timeout=600,
             )
             process.wait_output()
         except Exception as e:
