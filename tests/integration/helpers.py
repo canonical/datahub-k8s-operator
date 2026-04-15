@@ -4,14 +4,11 @@
 """Helpers for integration tests."""
 
 import logging
-import uuid
 from pathlib import Path
-from typing import Dict, Literal, Tuple
+from typing import Dict, Iterable, Mapping, Sequence, Tuple
 
+import jubilant
 import yaml
-from pytest_operator.plugin import OpsTest
-
-import exceptions
 
 logger = logging.getLogger(__name__)
 
@@ -40,73 +37,131 @@ INGRESS_NAME = "nginx-ingress-integrator"
 INGRESS_CHANNEL = "stable"
 
 
-# Used to make models unique between parallel runs.
-__RUN_ID = uuid.uuid4().hex
+def _app_status_current(status: jubilant.Status, app_name: str) -> str:
+    """Read workload status for an app, returning empty string if app is absent."""
+    app = status.apps.get(app_name)
+    if not app:
+        return ""
+    return app.app_status.current
 
 
-async def add_juju_secrets(ops_test: OpsTest) -> Dict[str, Tuple[str, str]]:
+def wait_for_apps_status(
+    juju: jubilant.Juju,
+    expected_by_app: Mapping[str, str | Sequence[str]],
+    *,
+    timeout: float,
+    raise_on_error: bool = True,
+) -> None:
+    """Wait until all apps in expected_by_app reach one of the expected workload statuses.
+
+    Args:
+        juju: Jubilant object.
+        expected_by_app: Mapping of app name to expected status string(s).
+        timeout: Maximum seconds to wait.
+        raise_on_error: If True, raise on any app entering error status.
+    """
+    normalized: Dict[str, set[str]] = {}
+    for app, expected in expected_by_app.items():
+        if isinstance(expected, str):
+            normalized[app] = {expected}
+        else:
+            normalized[app] = set(expected)
+
+    wait_kwargs: dict = {"timeout": timeout}
+    if raise_on_error:
+        wait_kwargs["error"] = lambda status: jubilant.any_error(status, *normalized.keys())
+    juju.wait(
+        lambda status: all(_app_status_current(status, app) in wanted for app, wanted in normalized.items()),
+        **wait_kwargs,
+    )
+
+
+def wait_for_all_active(juju: jubilant.Juju, apps: Iterable[str], *, timeout: float) -> None:
+    """Wait until all applications and units for apps are active.
+
+    Args:
+        juju: Jubilant object.
+        apps: Application names to wait for.
+        timeout: Maximum seconds to wait.
+    """
+    app_list = tuple(apps)
+    juju.wait(
+        lambda status: jubilant.all_active(status, *app_list),
+        error=lambda status: jubilant.any_error(status, *app_list),
+        timeout=timeout,
+    )
+
+
+def add_juju_secrets(juju: jubilant.Juju) -> Dict[str, Tuple[str, str]]:
     """Add required Juju user secrets to model.
 
     Args:
-        ops_test: PyTest object.
+        juju: Jubilant object.
 
     Returns:
         Dictionary of secrets to IDs.
     """
     keys_name = "encryption_keys"
-    secrets = await ops_test.model.list_secrets()
-    secrets = [secret for secret in secrets if secret.label == keys_name]
-    if secrets:
-        keys_id = secrets[0].uri.split(":")[-1]
+    secrets = juju.secrets()
+    current_secret = next(
+        (secret for secret in secrets if secret.label == keys_name or secret.name == keys_name),
+        None,
+    )
+    if current_secret:
+        keys_uri = str(current_secret.uri)
     else:
-        keys_secret = await ops_test.model.add_secret(
-            name=keys_name,
-            data_args=["gms-key=secret_secret123", "frontend-key=secret_secret123"],
+        keys_uri = str(
+            juju.add_secret(
+                name=keys_name,
+                content={"gms-key": "secret_secret123", "frontend-key": "secret_secret123"},
+            )
         )
-        keys_id = keys_secret.split(":")[-1]
 
     ret = {
-        "encryption-keys-secret": (keys_id, keys_name),
+        "encryption-keys-secret": (keys_uri.split(":")[-1], keys_uri),
     }
     return ret
 
 
-async def deploy_charm(ops_test: OpsTest, charm: Path, resources: dict) -> None:
+def deploy_charm(juju: jubilant.Juju, charm: Path, resources: dict) -> None:
     """Deploy the charm with the given config and OCI resources.
 
     Args:
-        ops_test: PyTest object.
+        juju: Jubilant object.
         charm: Path to charm package.
         resources: Dictionary linking the resource name to mapped local registry image.
     """
-    secrets = await add_juju_secrets(ops_test)
+    secrets = add_juju_secrets(juju)
     config = {"encryption-keys-secret-id": secrets["encryption-keys-secret"][0]}
 
-    await ops_test.model.deploy(charm, resources=resources, config=config, application_name=APP_NAME)
-    await ops_test.model.grant_secret(secrets["encryption-keys-secret"][1], APP_NAME)
+    juju.deploy(charm, app=APP_NAME, resources=resources, config=config)
+    juju.grant_secret(secrets["encryption-keys-secret"][1], APP_NAME)
 
     # Setup the ingress.
-    await ops_test.model.deploy(INGRESS_NAME, channel=INGRESS_CHANNEL, trust=True)
-    await ops_test.model.wait_for_idle(
-        apps=[INGRESS_NAME],
-        status="waiting",
-        raise_on_blocked=False,
-        timeout=200,
+    juju.deploy(INGRESS_NAME, channel=INGRESS_CHANNEL, trust=True)
+    wait_for_apps_status(
+        juju,
+        {
+            INGRESS_NAME: ("waiting", "active"),
+        },
+        timeout=5 * 60,
+        raise_on_error=False,
     )
-    await ops_test.model.integrate(f"{APP_NAME}:nginx-fe-route", INGRESS_NAME)
-    await ops_test.model.wait_for_idle(
-        apps=[INGRESS_NAME],
-        status="active",
-        raise_on_blocked=False,
-        timeout=300,
+    juju.integrate(f"{APP_NAME}:nginx-fe-route", INGRESS_NAME)
+    wait_for_apps_status(
+        juju,
+        {
+            INGRESS_NAME: "active",
+        },
+        timeout=10 * 60,
     )
 
 
-async def get_unit_url(ops_test: OpsTest, application: str, unit: str, port: int, protocol: str = "http"):
+def get_unit_url(juju: jubilant.Juju, application: str, unit: int, port: int, protocol: str = "http") -> str:
     """Return unit URL from the model.
 
     Args:
-        ops_test: PyTest object.
+        juju: Jubilant object.
         application: Name of the application.
         unit: Number of the unit.
         port: Port number of the URL.
@@ -114,74 +169,35 @@ async def get_unit_url(ops_test: OpsTest, application: str, unit: str, port: int
 
     Returns:
         Unit URL of the form {protocol}://{address}:{port}
+
+    Raises:
+        ValueError: If no reachable address is found for the unit.
     """
-    status = await ops_test.model.get_status()
-    address = status["applications"][application]["units"][f"{application}/{unit}"]["address"]
+    status = juju.status()
+    unit_name = f"{application}/{unit}"
+    app_status = status.apps[application]
+    unit_status = app_status.units.get(unit_name)
+
+    address = ""
+    if unit_status:
+        address = unit_status.public_address or unit_status.address
+    if not address:
+        address = app_status.address
+    if not address:
+        raise ValueError(f"No reachable address found for unit '{unit_name}'")
+
     return f"{protocol}://{address}:{port}"
 
 
-async def ensure_model(
-    label: str, ops_test: OpsTest, cloud_name: str, cloud_type: Literal["k8s", "lxd"], enable_debug_logs: bool = True
-) -> str:
-    """Get (or create) the model on the given cloud and return its name.
+def model_short_name(model_name: str) -> str:
+    """Return model name without controller prefix.
 
     Args:
-        label: Unique label to ensure a distinct model across tests.
-        ops_test: PyTest object.
-        cloud_name: Name of the cloud from the Juju controller.
-        cloud_type: Type of the cloud between k8s and lxd.
-        enable_debug_logs: Whether to have debug logs enabled in the model.
+        model_name: Full model name, possibly controller-prefixed.
 
     Returns:
-        Name of the model being ensured.
-
-    Raises:
-        SetupFailedError: If model creation or configuration fails.
+        Model name without the controller prefix.
     """
-    # Ref: https://github.com/canonical/livepatch-k8s-operator/blob/b48995d02f549dca0be46dd15790b5985669d7fe/tests/integration/helpers.py#L32  # noqa: W505
-    model_name = f"datahub-test-{label}-{cloud_name}-{__RUN_ID}"
-    # Juju limits model names to 63 characters. This does not guarantee name uniqueness!
-    model_name = model_name[:63]
-    if any((v.model_name == model_name for v in ops_test.models.values())):
-        return model_name
-
-    # Explicitly create the model to avoid auth errors.
-    code, stdout, stderr = await ops_test.juju("add-model", model_name, cloud_name)
-    if code != 0:
-        logger.error("'juju add-model' failed:\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
-        raise exceptions.SetupFailedError("command 'juju add-model' failed")
-
-    model = await ops_test.track_model(
-        alias=model_name,
-        model_name=model_name,
-        cloud_name=cloud_name,
-        use_existing=True,
-        keep=True,  # TODO (mertalpt): Switched for debug purposed, rollback before merge.
-    )
-
-    # No need for further processing.
-    if cloud_type != "k8s":
-        return model.name
-
-    # There is a bug that prevents deploying charms for k8s cloud on lxd controller.
-    # Prevent by updating the workload storage parameter.
-    # See:
-    # - https://bugs.launchpad.net/juju/+bug/2031216
-    # - https://bugs.launchpad.net/juju/+bug/2077426
-    controller_cloud = await (await model.get_controller()).cloud()
-    if controller_cloud.cloud.type_ == "lxd":
-        code, stdout, stderr = await ops_test.juju(
-            "model-config", "-m", model.name, "workload-storage=microk8s-hostpath"
-        )
-        if code != 0:
-            logger.error("'juju model-config' failed:\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
-            raise exceptions.SetupFailedError("command 'juju model-config' failed")
-
-    if enable_debug_logs:
-        code, stdout, stderr = await ops_test.juju(
-            "model-config", "-m", model.name, "logging-config=<root>=INFO;unit=DEBUG"
-        )
-        if code != 0:
-            logger.warning("could not enable debug logs, proceeding\n\tstdout: %s\n\tstderr: %s", stdout, stderr)
-
-    return model.name
+    if ":" in model_name:
+        return model_name.split(":", maxsplit=1)[1]
+    return model_name
