@@ -51,7 +51,7 @@ def setup_hybrid_cloud():
     os.unlink(client_config)
 
     # Add microk8s cloud to the LXD controller
-    subprocess.run(
+    result = subprocess.run(
         [
             "/usr/bin/sudo",
             "-g",
@@ -65,8 +65,15 @@ def setup_hybrid_cloud():
             "--credential",
             "microk8s",
         ],
+        capture_output=True,
+        text=True,
         check=False,
     )  # nosec B603
+    if result.returncode != 0:
+        if "already exists" in result.stderr or "already exists" in result.stdout:
+            logger.info("MicroK8s cloud already configured")
+        else:
+            raise RuntimeError(f"Failed to add microk8s cloud.\nStdout: {result.stdout}\nStderr: {result.stderr}")
 
 
 def _collect_juju_logs_if_failed(request: FixtureRequest, juju: jubilant.Juju) -> None:
