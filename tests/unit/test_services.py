@@ -89,3 +89,57 @@ def test_actions_compile_environment_omits_proxy_vars_when_unset():
     assert "http_proxy" not in env
     assert "https_proxy" not in env
     assert "no_proxy" not in env
+
+
+def test_gms_compile_environment_includes_system_client():
+    """GMS environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET from trino_relation."""
+    state = SimpleNamespace(
+        database_connection={
+            "host": "db",
+            "port": "5432",
+            "username": "u",
+            "password": "p",  # nosec
+            "dbname": "datahub_db",
+            "initialized": True,
+        },
+        kafka_connection={
+            "bootstrap_server": "kafka:9092",
+            "username": "u",
+            "password": "p",  # nosec
+            "initialized": True,
+        },
+        opensearch_connection={
+            "host": "os",
+            "port": "9200",
+            "username": "u",
+            "password": "p",  # nosec
+            "tls-ca": "cert",
+            "initialized": True,
+        },
+        ran_upgrade=True,
+        gms_truststore_initialized=True,
+    )
+    encryption_secret = SimpleNamespace(
+        get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
+    )
+    model = SimpleNamespace(get_secret=lambda id: encryption_secret)
+    config = SimpleNamespace(
+        encryption_keys_secret_id="enc-id",  # nosec B106
+        opensearch_index_prefix="",
+        kafka_topic_prefix="",
+    )
+    charm = SimpleNamespace(
+        _state=state,
+        config=config,
+        model=model,
+        system_client_id="__datahub_system",
+        system_client_secret="my-secret",  # nosec B106
+    )
+    context = services.ServiceContext(charm=charm)
+
+    with patch.object(services.GMSService, "is_enabled", return_value=True):
+        env = services.GMSService.compile_environment(context)
+
+    assert env is not None
+    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"
+    assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
