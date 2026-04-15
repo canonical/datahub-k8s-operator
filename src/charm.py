@@ -27,6 +27,7 @@ from log import log_event_handler
 from relations.kafka import KafkaRelation
 from relations.opensearch import OpenSearchRelation
 from relations.postgresql import PostgresqlRelation
+from relations.trino import TrinoRelation
 from state import State
 from structured_config import CharmConfig
 
@@ -99,6 +100,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         config_type: Class used to store the config.
         external_fe_hostname: Property for the hostname of the frontend visible to outside.
         external_gms_hostname: Property for the hostname of the GMS visible to outside.
+        system_client_id: The DataHub system client identifier for API auth.
+        system_client_secret: The DataHub system client secret for API auth.
     """
 
     config_type = CharmConfig
@@ -111,6 +114,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         super().__init__(framework)
         self._state = State(self.app, lambda: self.model.get_relation("peer"))
+
+        # DataHub system client credentials (used for programmatic API access).
+        self._system_client_id = "__datahub_system"
 
         # Services
         for service in SERVICES:
@@ -144,8 +150,21 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         )
         self.opensearch_relation = OpenSearchRelation(self)
 
+        # Trino
+        self.trino_relation = TrinoRelation(self)
+
         # Ingress
         self._require_nginx_route()
+
+    @property
+    def system_client_id(self) -> str:
+        """Return the DataHub system client identifier."""
+        return self._system_client_id
+
+    @property
+    def system_client_secret(self) -> str:
+        """Return the DataHub system client secret."""
+        return self._get_or_create_system_client_secret()
 
     @property
     def external_fe_hostname(self):
@@ -426,6 +445,25 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             secret = self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
             relation.data[self.app][literals.INIT_PWD_SECRET_LABEL] = secret.id
             return content["password"]
+
+        return ""
+
+    def _get_or_create_system_client_secret(self):
+        """Return the system client secret, creating it on the leader if it does not exist."""
+        relation = self.model.get_relation("peer")
+        if not relation:
+            return ""
+
+        secret_id = relation.data[self.app].get(literals.SYSTEM_CLIENT_SECRET_LABEL, None)
+        if secret_id:
+            secret = self.model.get_secret(id=secret_id)
+            return secret.peek_content().get("secret")
+
+        if self.unit.is_leader():
+            content = {"secret": utils.generate_secret(64)}
+            secret = self.app.add_secret(content, label=literals.SYSTEM_CLIENT_SECRET_LABEL)
+            relation.data[self.app][literals.SYSTEM_CLIENT_SECRET_LABEL] = secret.id
+            return content["secret"]
 
         return ""
 
