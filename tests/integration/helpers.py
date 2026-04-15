@@ -99,7 +99,7 @@ def add_juju_secrets(juju: jubilant.Juju) -> Dict[str, Tuple[str, str]]:
         juju: Jubilant object.
 
     Returns:
-        Dictionary of secrets to IDs.
+        Dictionary mapping secret names to ``(secret_id, secret_uri)`` tuples.
     """
     keys_name = "encryption_keys"
     secrets = juju.secrets()
