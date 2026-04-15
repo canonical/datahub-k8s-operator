@@ -10,7 +10,7 @@ from ops import testing
 
 from charm import DatahubK8SOperatorCharm
 
-_SECRET_ID = "secret:test-encryption-secret-id"  # nosec B105
+_SECRET_ID = "test-encryption-secret-id"  # nosec B105
 
 
 @pytest.fixture
