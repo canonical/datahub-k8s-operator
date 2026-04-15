@@ -316,7 +316,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Raises:
             ImproperSecretError: If the contents of the secret pointed to by
                 'encryption-keys-secret-id' is malformed.
-            UnreadyStateError: In case of invalid configuration or uninitialized relations.
+            UnreadyStateError: In case of invalid configuration, uninitialized relations,
+                or an inaccessible 'encryption-keys-secret-id' secret.
         """
         # Check all required configuration is set.
         configs = {
@@ -329,12 +330,22 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             raise exceptions.UnreadyStateError(err)
 
         # Validate secret schema.
-        encryption_keys_secret = self.model.get_secret(id=self.config.encryption_keys_secret_id)
-
-        # TODO (mertalpt): Handle this secret so that the application does not break
-        # if it is changed.
-
-        content = encryption_keys_secret.get_content(refresh=True)
+        encryption_keys_secret_id = self.config.encryption_keys_secret_id
+        try:
+            encryption_keys_secret = self.model.get_secret(id=encryption_keys_secret_id)
+            content = encryption_keys_secret.get_content(refresh=True)
+        except ops.SecretNotFoundError:
+            raise exceptions.UnreadyStateError(
+                "secret pointed to by 'encryption-keys-secret-id' "
+                f"({encryption_keys_secret_id}) was not found; "
+                "ensure the secret exists and has been granted to this application"
+            ) from None
+        except ops.ModelError as e:
+            raise exceptions.UnreadyStateError(
+                "cannot read secret pointed to by 'encryption-keys-secret-id' "
+                f"({encryption_keys_secret_id}): {e}; "
+                "ensure the secret has been granted to this application"
+            ) from None
         if "" in (
             content.get("gms-key", ""),
             content.get("frontend-key", ""),
