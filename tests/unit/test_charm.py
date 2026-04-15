@@ -11,6 +11,8 @@ from ops import testing
 
 import exceptions
 
+_SECRET_ID = "test-encryption-secret-id"  # nosec B105
+
 
 class TestCheckStateSecretAccess:
     """Tests for secret-access failure handling in _check_state."""
@@ -62,3 +64,40 @@ class TestCheckStateSecretAccess:
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)
         assert "encryption-keys-secret-id" in state_out.unit_status.message
+
+
+class TestSystemClientSecret:
+    """Tests for system client secret persistence lifecycle."""
+
+    def test_returns_empty_without_peer_relation(self, charm_ctx):
+        """Returns empty string when peer relation is not yet available."""
+        state = testing.State(
+            config={"encryption-keys-secret-id": _SECRET_ID},
+            leader=True,
+        )
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            assert mgr.charm.system_client_secret == ""  # nosec B105
+
+    def test_leader_creates_secret_on_first_access(self, charm_ctx):
+        """Leader creates an app-owned secret and returns its value on first access."""
+        peer = testing.PeerRelation(endpoint="peer")
+        state = testing.State(
+            config={"encryption-keys-secret-id": _SECRET_ID},
+            relations=[peer],
+            leader=True,
+        )
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            secret = mgr.charm.system_client_secret
+            assert secret != ""  # nosec B105
+            assert mgr.charm.system_client_secret == secret
+
+    def test_non_leader_returns_empty_before_leader_creates(self, charm_ctx):
+        """Non-leader returns empty string when secret has not yet been created."""
+        peer = testing.PeerRelation(endpoint="peer")
+        state = testing.State(
+            config={"encryption-keys-secret-id": _SECRET_ID},
+            relations=[peer],
+            leader=False,
+        )
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            assert mgr.charm.system_client_secret == ""  # nosec B105

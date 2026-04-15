@@ -43,6 +43,8 @@ charm-libs:
     version: "0"
   - lib: nginx_ingress_integrator.nginx_route
     version: "0"
+  - lib: trino_k8s.trino_catalog
+    version: "0"
 
 parts:
   charm:
@@ -82,6 +84,10 @@ requires:
 
   nginx-gms-route:
     interface: nginx-route
+    limit: 1
+
+  trino-catalog:
+    interface: trino_catalog
     limit: 1
 
 config:
@@ -129,6 +135,27 @@ config:
         unsupported for horizontally scaled deployments.
       type: boolean
       default: false
+
+    schema-pattern:
+      description: |
+        JSON string for the schema pattern used for Trino ingestions.
+        Must be a JSON object with "allow" and "deny" lists of regex patterns.
+      type: string
+      default: '{"allow":[".*"],"deny":[]}'
+
+    table-pattern:
+      description: |
+        JSON string for the table pattern used for Trino ingestions.
+        Must be a JSON object with "allow" and "deny" lists of regex patterns.
+      type: string
+      default: '{"allow":[".*"],"deny":[]}'
+
+    column-pattern:
+      description: |
+        JSON string for the column pattern used for Trino ingestions.
+        Must be a JSON object with "allow" and "deny" lists of regex patterns.
+      type: string
+      default: '{"allow":[".*"],"deny":[]}'
 
 actions:
   reindex:

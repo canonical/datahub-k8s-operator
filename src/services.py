@@ -670,6 +670,10 @@ class GMSService(AbstractService):
             env["INDEX_PREFIX"] = context.charm.config.opensearch_index_prefix
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
+
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
+
         return env
 
     @classmethod
