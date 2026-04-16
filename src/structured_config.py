@@ -26,6 +26,9 @@ class CharmConfig(BaseConfigModel):
         external_fe_hostname: Hostname of frontend visible to outside.
         external_gms_hostname: Hostname of GMS visible to outside.
         tls_secret_name: Name of the k8s secret to use for the TLS certificate.
+        schema_pattern: JSON pattern string for Trino ingestion schema filtering.
+        table_pattern: JSON pattern string for Trino ingestion table filtering.
+        column_pattern: JSON pattern string for Trino ingestion column filtering.
     """
 
     auth_verbose_logging: bool = False
@@ -37,6 +40,9 @@ class CharmConfig(BaseConfigModel):
     external_fe_hostname: Optional[str] = None
     external_gms_hostname: Optional[str] = None
     tls_secret_name: Optional[str] = None
+    schema_pattern: str = '{"allow":[".*"],"deny":[]}'
+    table_pattern: str = '{"allow":[".*"],"deny":[]}'
+    column_pattern: str = '{"allow":[".*"],"deny":[]}'
 
     @field_validator("*", mode="before")
     @classmethod
