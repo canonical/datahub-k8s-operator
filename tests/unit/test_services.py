@@ -43,7 +43,14 @@ def test_actions_compile_environment_includes_proxy_vars():
         }
     )
     config = SimpleNamespace(kafka_topic_prefix="")
-    context = services.ServiceContext(charm=SimpleNamespace(_state=state, config=config))
+    context = services.ServiceContext(
+        charm=SimpleNamespace(
+            _state=state,
+            config=config,
+            system_client_id="__datahub_system",
+            system_client_secret="my-secret",  # nosec B106
+        )
+    )
 
     with patch.object(services.ActionsService, "is_enabled", return_value=True):
         with patch.dict(
@@ -76,7 +83,14 @@ def test_actions_compile_environment_omits_proxy_vars_when_unset():
         }
     )
     config = SimpleNamespace(kafka_topic_prefix="")
-    context = services.ServiceContext(charm=SimpleNamespace(_state=state, config=config))
+    context = services.ServiceContext(
+        charm=SimpleNamespace(
+            _state=state,
+            config=config,
+            system_client_id="__datahub_system",
+            system_client_secret="my-secret",  # nosec B106
+        )
+    )
 
     with patch.object(services.ActionsService, "is_enabled", return_value=True):
         with patch.dict(os.environ, {}, clear=True):
@@ -139,6 +153,83 @@ def test_gms_compile_environment_includes_system_client():
 
     with patch.object(services.GMSService, "is_enabled", return_value=True):
         env = services.GMSService.compile_environment(context)
+
+    assert env is not None
+    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"
+    assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
+
+
+def test_actions_compile_environment_includes_system_client():
+    """Actions environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET."""
+    state = SimpleNamespace(
+        kafka_connection={
+            "bootstrap_server": "kafka:9092",
+            "username": "user",
+            "password": "pass",  # nosec
+        }
+    )
+    config = SimpleNamespace(kafka_topic_prefix="")
+    charm = SimpleNamespace(
+        _state=state,
+        config=config,
+        system_client_id="__datahub_system",
+        system_client_secret="my-secret",  # nosec B106
+    )
+    context = services.ServiceContext(charm=charm)
+
+    with patch.object(services.ActionsService, "is_enabled", return_value=True):
+        with patch.dict(os.environ, {}, clear=True):
+            env = services.ActionsService.compile_environment(context)
+
+    assert env is not None
+    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"
+    assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
+
+
+def test_frontend_compile_environment_includes_system_client():
+    """Frontend environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET."""
+    state = SimpleNamespace(
+        kafka_connection={
+            "bootstrap_server": "kafka:9092",
+            "username": "u",
+            "password": "p",  # nosec
+            "initialized": True,
+        },
+        opensearch_connection={
+            "host": "os",
+            "port": "9200",
+            "username": "u",
+            "password": "p",  # nosec
+            "tls-ca": "cert",
+            "initialized": True,
+        },
+        ran_upgrade=True,
+        frontend_truststore_initialized=True,
+    )
+    encryption_secret = SimpleNamespace(
+        get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
+    )
+    model = SimpleNamespace(get_secret=lambda id: encryption_secret)
+    config = SimpleNamespace(
+        encryption_keys_secret_id="enc-id",  # nosec B106
+        opensearch_index_prefix="",
+        kafka_topic_prefix="",
+        use_play_cache_session_store=False,
+        oidc_secret_id=None,
+        external_fe_hostname="",
+    )
+    charm = SimpleNamespace(
+        _state=state,
+        config=config,
+        model=model,
+        system_client_id="__datahub_system",
+        system_client_secret="my-secret",  # nosec B106
+    )
+    context = services.ServiceContext(charm=charm)
+
+    with patch.object(services.FrontendService, "is_enabled", return_value=True):
+        with patch.dict(os.environ, {}, clear=True):
+            env = services.FrontendService.compile_environment(context)
 
     assert env is not None
     assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"

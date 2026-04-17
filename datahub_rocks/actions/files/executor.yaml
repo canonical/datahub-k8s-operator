@@ -44,4 +44,4 @@ action:
 datahub:
   server: "${DATAHUB_GMS_PROTOCOL}://${DATAHUB_GMS_HOST}:${DATAHUB_GMS_PORT}"
   extra_headers:
-    Authorization: "Basic ${DATAHUB_SYSTEM_CLIENT_ID:-__datahub_system}:${DATAHUB_SYSTEM_CLIENT_SECRET:-JohnSnowKnowsNothing}"
+    Authorization: "Basic ${DATAHUB_SYSTEM_CLIENT_ID:?DATAHUB_SYSTEM_CLIENT_ID must be set}:${DATAHUB_SYSTEM_CLIENT_SECRET:?DATAHUB_SYSTEM_CLIENT_SECRET must be set}"
