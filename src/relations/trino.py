@@ -131,14 +131,16 @@ def _build_recipe(catalog_name: str, params: "_IngestionParams") -> str:
 def _graphql_request(
     query: str,
     variables: Optional[Dict[str, Any]],
-    bearer_token: str,
+    token: str,
+    auth_scheme: str = "Bearer",
 ) -> Dict[str, Any]:
     """Execute a GraphQL request against the DataHub GMS endpoint.
 
     Args:
         query: GraphQL query or mutation string.
         variables: Optional variables for the query.
-        bearer_token: Bearer token for authentication.
+        token: Authentication token or credentials.
+        auth_scheme: HTTP auth scheme (e.g. "Bearer" or "Basic").
 
     Returns:
         The parsed JSON response body.
@@ -147,7 +149,7 @@ def _graphql_request(
         RuntimeError: If the request fails or returns GraphQL errors.
     """
     headers = {
-        "Authorization": f"Bearer {bearer_token}",
+        "Authorization": f"{auth_scheme} {token}",
         "Content-Type": "application/json",
     }
     payload: Dict[str, Any] = {"query": query}
@@ -164,11 +166,14 @@ def _graphql_request(
     return body
 
 
-def _create_access_token(bearer_token: str) -> str:
+def _create_access_token(system_client_id: str, system_client_secret: str) -> str:
     """Create a DataHub access token for the system user.
 
+    Uses Basic auth with system client credentials to bootstrap a token.
+
     Args:
-        bearer_token: System client secret used as bearer for this request.
+        system_client_id: DataHub system client identifier.
+        system_client_secret: DataHub system client secret.
 
     Returns:
         The generated access token string.
@@ -188,7 +193,8 @@ def _create_access_token(bearer_token: str) -> str:
             "name": "juju-managed-ingestion-token",
         }
     }
-    body = _graphql_request(query, variables, bearer_token)
+    basic_credentials = f"{system_client_id}:{system_client_secret}"
+    body = _graphql_request(query, variables, basic_credentials, auth_scheme="Basic")
     return body["data"]["createAccessToken"]["accessToken"]
 
 
@@ -433,7 +439,7 @@ class TrinoRelation(framework.Object):
             RuntimeError: If token creation fails.
         """
         if self._access_token is None:
-            self._access_token = _create_access_token(self.charm.system_client_secret)
+            self._access_token = _create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
         return self._access_token
 
     @log_event_handler(logger)
@@ -490,10 +496,9 @@ class TrinoRelation(framework.Object):
         desired_catalogs = {catalog.name for catalog in catalogs}
 
         try:
-            bearer = self.charm.system_client_secret
-            token = self.access_token
+            access_token = self.access_token
 
-            all_sources = _list_ingestion_sources(bearer)
+            all_sources = _list_ingestion_sources(access_token)
             managed = _filter_juju_managed(all_sources)
         except Exception as e:
             logger.error("Failed to fetch ingestion sources from DataHub: %s", str(e))
@@ -509,15 +514,15 @@ class TrinoRelation(framework.Object):
             trino_url=trino_url,
             username=username,
             password=password,
-            access_token=token,
+            access_token=access_token,
             schema_pattern=config.schema_pattern,
             table_pattern=config.table_pattern,
             column_pattern=config.column_pattern,
         )
 
-        self._create_missing_ingestions(desired_catalogs, existing_by_catalog, bearer, params)
-        self._update_existing_ingestions(desired_catalogs, existing_by_catalog, bearer, params)
-        self._delete_obsolete_ingestions(desired_catalogs, existing_by_catalog, bearer)
+        self._create_missing_ingestions(desired_catalogs, existing_by_catalog, access_token, params)
+        self._update_existing_ingestions(desired_catalogs, existing_by_catalog, access_token, params)
+        self._delete_obsolete_ingestions(desired_catalogs, existing_by_catalog, access_token)
 
     def _create_missing_ingestions(
         self,
@@ -577,8 +582,8 @@ class TrinoRelation(framework.Object):
     def _cleanup_managed_ingestions(self) -> None:
         """Delete all Juju-managed Trino ingestion sources (relation-broken cleanup)."""
         try:
-            bearer = self.charm.system_client_secret
-            all_sources = _list_ingestion_sources(bearer)
+            access_token = self.access_token
+            all_sources = _list_ingestion_sources(access_token)
             managed = _filter_juju_managed(all_sources)
         except Exception as e:
             logger.error("Failed to fetch ingestion sources during cleanup: %s", str(e))
@@ -586,7 +591,7 @@ class TrinoRelation(framework.Object):
 
         for source in managed:
             try:
-                _delete_ingestion_source(bearer, source["urn"])
+                _delete_ingestion_source(access_token, source["urn"])
                 logger.info("Cleaned up ingestion source '%s'", source["name"])
             except Exception as e:
                 logger.error("Failed to clean up ingestion '%s': %s", source["name"], str(e))
