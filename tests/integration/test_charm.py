@@ -99,7 +99,7 @@ def full_stack(k8s_juju: jubilant.Juju, lxd_juju: jubilant.Juju, charm: Path, ro
         timeout=20 * 60,
         raise_on_error=False,
     )
-    
+
     logger.info("Integrating consumed offers")
     k8s_juju.integrate(f"{helpers.APP_NAME}:kafka", helpers.KAFKA_OFFER_NAME)
     k8s_juju.integrate(f"{helpers.APP_NAME}:opensearch", helpers.OPENSEARCH_OFFER_NAME)
