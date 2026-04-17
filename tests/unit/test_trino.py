@@ -124,6 +124,7 @@ class TestTrinoRelationAuth:
         """Access token is lazily created via _create_access_token."""
         with patch("relations.trino.TrinoCatalogRequirer"):
             charm = MagicMock()
+            charm.system_client_id = "__datahub_system"
             charm.system_client_secret = "test-secret"  # nosec B105
             charm.framework = MagicMock()
             charm.on = MagicMock()
@@ -136,7 +137,7 @@ class TestTrinoRelationAuth:
             second = rel.access_token
             assert first == "tok-abc"
             assert second == "tok-abc"
-            mock_create.assert_called_once_with("test-secret")
+            mock_create.assert_called_once_with("__datahub_system", "test-secret")
 
 
 class TestTrinoRelationEvents:
@@ -211,6 +212,7 @@ class TestReconciliation:
                 table_pattern='{"allow":[".*"],"deny":[]}',
                 column_pattern='{"allow":[".*"],"deny":[]}',
             )
+            charm.system_client_id = "__datahub_system"
             charm.system_client_secret = "test-secret"  # nosec B105
             charm.framework = MagicMock()
             charm.on = MagicMock()
@@ -296,7 +298,7 @@ class TestReconciliation:
 
         mock_create.assert_not_called()
         mock_update.assert_not_called()
-        mock_delete.assert_called_once_with("test-secret", "urn:old")
+        mock_delete.assert_called_once_with("test-token", "urn:old")
 
     @patch("relations.trino._delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
@@ -334,7 +336,7 @@ class TestReconciliation:
 
         rel._cleanup_managed_ingestions()
 
-        mock_delete.assert_called_once_with("test-secret", "urn:a")
+        mock_delete.assert_called_once_with("test-token", "urn:a")
 
 
 class TestScheduleStability:
