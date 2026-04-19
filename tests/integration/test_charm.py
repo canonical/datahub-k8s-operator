@@ -131,16 +131,31 @@ def test_deploy_full(full_stack: jubilant.Juju):
     logger.info("Fetching admin password")
     admin_pwd = _get_password(full_stack)
 
-    url = f"{base_url}/login"
+    url = f"{base_url}/logIn"
+    logger.info("Testing against URL: %s", url)
 
     def _can_login(_: jubilant.Status) -> bool:
         """Attempt login and return True on success."""
         try:
             response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
-        except requests.RequestException:
-            return False
-        return response.status_code == 200
 
+            if response.status_code == 200:
+                return True
+
+            logger.info(
+                "Login failed | Status: %d | Body: %s | Headers: %s",
+                response.status_code,
+                response.text[:500],  # Truncate to avoid flooding logs
+                response.headers,
+            )
+            return False
+
+        except requests.RequestException as e:
+            # This catches connection errors, timeouts, and DNS issues
+            logger.info("Login connection error: %s", str(e))
+            return False
+
+    logger.info("Waiting for frontend to be ready")
     full_stack.wait(_can_login, timeout=15 * 60, delay=10, successes=1)
 
     response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
