@@ -136,26 +136,14 @@ config:
       type: boolean
       default: false
 
-    schema-pattern:
+    trino-patterns:
       description: |
-        JSON string for the schema pattern used for Trino ingestions.
-        Must be a JSON object with "allow" and "deny" lists of regex patterns.
+        JSON object containing schema, table, and view filter patterns for
+        Trino ingestion sources.  Each key ("schema-pattern", "table-pattern",
+        "view-pattern") maps to an object with "allow" and "deny" lists of
+        regex patterns.
       type: string
-      default: '{"allow":[".*"],"deny":[]}'
-
-    table-pattern:
-      description: |
-        JSON string for the table pattern used for Trino ingestions.
-        Must be a JSON object with "allow" and "deny" lists of regex patterns.
-      type: string
-      default: '{"allow":[".*"],"deny":[]}'
-
-    column-pattern:
-      description: |
-        JSON string for the column pattern used for Trino ingestions.
-        Must be a JSON object with "allow" and "deny" lists of regex patterns.
-      type: string
-      default: '{"allow":[".*"],"deny":[]}'
+      default: '{"schema-pattern":{"allow":[".*"],"deny":[]},"table-pattern":{"allow":[".*"],"deny":[]},"view-pattern":{"allow":[".*"],"deny":[]}}'
 
 actions:
   get-password:

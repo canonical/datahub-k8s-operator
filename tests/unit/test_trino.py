@@ -9,14 +9,18 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from relations.trino import (
+    GMS_TOKEN_SECRET_NAME,
     JUJU_MANAGED_KEY,
     TrinoRelation,
+    _AuthenticationError,
     _build_ingestion_name,
+    _build_managed_extra_args,
     _build_recipe,
-    _compile_proxy_extra_args,
+    _compile_extra_env_vars,
     _extract_catalog_from_name,
     _filter_juju_managed,
     _IngestionParams,
+    _normalize_secret_name,
     _random_daily_schedule,
 )
 
@@ -46,8 +50,8 @@ class TestHelpers:
         assert 0 <= minute <= 59
         assert hour in {22, 23, 0, 1, 2, 3, 4, 5}
 
-    def test_compile_proxy_extra_args_with_proxies(self):
-        """Compile proxy args when Juju proxy vars are set."""
+    def test_compile_extra_env_vars_with_proxies(self):
+        """Compile extra_env_vars when Juju proxy vars are set."""
         with patch.dict(
             os.environ,
             {
@@ -57,19 +61,61 @@ class TestHelpers:
             },
             clear=True,
         ):
-            args = _compile_proxy_extra_args()
-        assert args["HTTP_PROXY"] == "http://proxy:8080"
-        assert args["HTTPS_PROXY"] == "http://proxy:8443"
-        assert args["NO_PROXY"] == "localhost"
+            env = _compile_extra_env_vars()
+        assert env[JUJU_MANAGED_KEY] == "true"
+        assert env["HTTP_PROXY"] == "http://proxy:8080"
+        assert env["http_proxy"] == "http://proxy:8080"
+        assert env["HTTPS_PROXY"] == "http://proxy:8443"
+        assert env["https_proxy"] == "http://proxy:8443"
+        assert env["NO_PROXY"] == "localhost"
+        assert env["no_proxy"] == "localhost"
 
-    def test_compile_proxy_extra_args_without_proxies(self):
-        """Compile proxy args when no Juju proxy vars are set."""
+    def test_compile_extra_env_vars_without_proxies(self):
+        """Compile extra_env_vars when no Juju proxy vars are set."""
         with patch.dict(os.environ, {}, clear=True):
-            args = _compile_proxy_extra_args()
-        assert not args
+            env = _compile_extra_env_vars()
+        assert env == {JUJU_MANAGED_KEY: "true"}
 
-    def test_filter_juju_managed_includes_managed(self):
-        """Filter includes sources with JUJU_MANAGED=True."""
+    def test_build_managed_extra_args_structure(self):
+        """Build managed extra_args produces a single extra_env_vars entry."""
+        with patch.dict(os.environ, {}, clear=True):
+            args = _build_managed_extra_args()
+        assert len(args) == 1
+        assert args[0]["key"] == "extra_env_vars"
+        env = json.loads(args[0]["value"])
+        assert env[JUJU_MANAGED_KEY] == "true"
+
+    def test_normalize_secret_name(self):
+        """Normalize catalog name into a valid DataHub secret name."""
+        assert _normalize_secret_name("my-catalog.test") == "JUJU_MANAGED_TRINO_PASSWORD_MY_CATALOG_TEST"
+
+    def test_filter_juju_managed_extra_env_vars_format(self):
+        """Filter detects the extra_env_vars JSON format."""
+        sources = [
+            {
+                "urn": "urn:1",
+                "name": "[juju] a-ingestion",
+                "config": {
+                    "extraArgs": [
+                        {
+                            "key": "extra_env_vars",
+                            "value": json.dumps({JUJU_MANAGED_KEY: "true"}),
+                        }
+                    ]
+                },
+            },
+            {
+                "urn": "urn:2",
+                "name": "manual-source",
+                "config": {"extraArgs": []},
+            },
+        ]
+        result = _filter_juju_managed(sources)
+        assert len(result) == 1
+        assert result[0]["urn"] == "urn:1"
+
+    def test_filter_juju_managed_legacy_format(self):
+        """Filter includes sources with legacy top-level JUJU_MANAGED=True."""
         sources = [
             {
                 "urn": "urn:1",
@@ -96,15 +142,18 @@ class TestHelpers:
         assert not result
 
     def test_build_recipe_structure(self):
-        """Build recipe produces valid JSON with expected keys."""
+        """Build recipe produces valid JSON with expected keys and secret references."""
+        default_pattern = {"allow": [".*"], "deny": []}
         params = _IngestionParams(
             trino_url="trino:443",
             username="user",
             password="pass",  # nosec
             access_token="tok123",
-            schema_pattern='{"allow":[".*"],"deny":[]}',
-            table_pattern='{"allow":[".*"],"deny":[]}',
-            column_pattern='{"allow":[".*"],"deny":[]}',
+            trino_patterns={
+                "schema-pattern": default_pattern,
+                "table-pattern": default_pattern,
+                "view-pattern": default_pattern,
+            },
         )
         recipe_str = _build_recipe("my_catalog", params)
         recipe = json.loads(recipe_str)
@@ -112,9 +161,13 @@ class TestHelpers:
         assert recipe["source"]["config"]["database"] == "my_catalog"
         assert recipe["source"]["config"]["host_port"] == "trino:443"
         assert recipe["source"]["config"]["username"] == "user"
+        assert recipe["source"]["config"]["view_pattern"] == default_pattern
+        assert "column_pattern" not in recipe["source"]["config"]
         assert recipe["source"]["config"]["stateful_ingestion"]["enabled"] is True
         assert recipe["source"]["config"]["env"] == "PROD"
-        assert recipe["sink"]["config"]["token"] == "tok123"
+        # Credentials use DataHub secret references
+        assert recipe["source"]["config"]["password"] == "${JUJU_MANAGED_TRINO_PASSWORD_MY_CATALOG}"
+        assert recipe["sink"]["config"]["token"] == f"${{{GMS_TOKEN_SECRET_NAME}}}"
 
 
 class TestTrinoRelationAuth:
@@ -198,20 +251,24 @@ class TestTrinoRelationEvents:
         event.defer.assert_called_once()
 
 
-class TestReconciliation:
+class TestReconciliation:  # pylint: disable=too-many-positional-arguments
     """Tests for ingestion source reconciliation logic."""
 
     def _make_relation(self):
         """Create TrinoRelation with mocked charm wired for reconciliation."""
+        default_pattern = {"allow": [".*"], "deny": []}
+        trino_patterns = json.dumps(
+            {
+                "schema-pattern": default_pattern,
+                "table-pattern": default_pattern,
+                "view-pattern": default_pattern,
+            }
+        )
         with patch("relations.trino.TrinoCatalogRequirer"):
             charm = MagicMock()
             charm.unit.is_leader.return_value = True
             charm._state.is_ready.return_value = True
-            charm.config = SimpleNamespace(
-                schema_pattern='{"allow":[".*"],"deny":[]}',
-                table_pattern='{"allow":[".*"],"deny":[]}',
-                column_pattern='{"allow":[".*"],"deny":[]}',
-            )
+            charm.config = SimpleNamespace(trino_patterns=trino_patterns)
             charm.system_client_id = "__datahub_system"
             charm.system_client_secret = "test-secret"  # nosec B105
             charm.framework = MagicMock()
@@ -226,7 +283,9 @@ class TestReconciliation:
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
     @patch("relations.trino._list_ingestion_sources")
-    def test_reconcile_creates_missing(self, mock_list, mock_create, mock_update, mock_delete):
+    @patch("relations.trino._ensure_secret")
+    @patch("relations.trino._list_secrets", return_value={})
+    def test_reconcile_creates_missing(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile creates ingestion for catalogs not yet present."""
         rel = self._make_relation()
         catalog = SimpleNamespace(name="sales")
@@ -248,7 +307,9 @@ class TestReconciliation:
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
     @patch("relations.trino._list_ingestion_sources")
-    def test_reconcile_updates_existing(self, mock_list, mock_create, mock_update, mock_delete):
+    @patch("relations.trino._ensure_secret")
+    @patch("relations.trino._list_secrets", return_value={})
+    def test_reconcile_updates_existing(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile updates ingestion for catalogs already present."""
         rel = self._make_relation()
         catalog = SimpleNamespace(name="sales")
@@ -277,7 +338,9 @@ class TestReconciliation:
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
     @patch("relations.trino._list_ingestion_sources")
-    def test_reconcile_deletes_obsolete(self, mock_list, mock_create, mock_update, mock_delete):
+    @patch("relations.trino._ensure_secret")
+    @patch("relations.trino._list_secrets", return_value={})
+    def test_reconcile_deletes_obsolete(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile deletes ingestion for catalogs no longer in relation."""
         rel = self._make_relation()
         rel.trino_catalog.get_trino_info.return_value = {
@@ -304,7 +367,9 @@ class TestReconciliation:
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
     @patch("relations.trino._list_ingestion_sources")
-    def test_reconcile_noop_when_synced(self, mock_list, mock_create, mock_update, mock_delete):
+    @patch("relations.trino._ensure_secret")
+    @patch("relations.trino._list_secrets", return_value={})
+    def test_reconcile_noop_when_synced(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile makes no changes when state is already in sync (no-op)."""
         rel = self._make_relation()
         rel.trino_catalog.get_trino_info.return_value = None
@@ -325,7 +390,14 @@ class TestReconciliation:
             {
                 "urn": "urn:a",
                 "name": "[juju] a-ingestion",
-                "config": {"extraArgs": [{"key": JUJU_MANAGED_KEY, "value": "True"}]},
+                "config": {
+                    "extraArgs": [
+                        {
+                            "key": "extra_env_vars",
+                            "value": json.dumps({JUJU_MANAGED_KEY: "true"}),
+                        }
+                    ]
+                },
             },
             {
                 "urn": "urn:b",
@@ -339,14 +411,18 @@ class TestReconciliation:
         mock_delete.assert_called_once_with("test-token", "urn:a")
 
 
-class TestScheduleStability:
+class TestScheduleStability:  # pylint: disable=too-many-positional-arguments
     """Tests for schedule-once policy."""
 
     @patch("relations.trino._delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
     @patch("relations.trino._list_ingestion_sources")
-    def test_update_preserves_existing_schedule(self, mock_list, mock_create, mock_update, mock_delete):
+    @patch("relations.trino._ensure_secret")
+    @patch("relations.trino._list_secrets", return_value={})
+    def test_update_preserves_existing_schedule(
+        self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete
+    ):
         """Update reconciliation preserves the original schedule."""
         rel = TestReconciliation()._make_relation()
         catalog = SimpleNamespace(name="marketing")
@@ -374,3 +450,38 @@ class TestScheduleStability:
         call_args = mock_update.call_args
         passed_source = call_args[0][2]
         assert passed_source["schedule"] == original_schedule
+
+
+class TestAuthRetry:  # pylint: disable=too-many-positional-arguments
+    """Tests for authentication error handling and token refresh."""
+
+    def _make_relation(self):
+        """Create TrinoRelation wired for auth retry tests."""
+        return TestReconciliation()._make_relation()
+
+    @patch("relations.trino._delete_ingestion_source")
+    @patch("relations.trino._update_ingestion_source")
+    @patch("relations.trino._create_ingestion_source")
+    @patch("relations.trino._list_ingestion_sources")
+    @patch("relations.trino._ensure_secret")
+    @patch("relations.trino._list_secrets")
+    def test_reconcile_retries_on_auth_error(
+        self, mock_ls, _mock_es, mock_list, mock_create, _mock_update, _mock_delete
+    ):
+        """Reconcile clears token and retries once on auth failure."""
+        rel = self._make_relation()
+        catalog = SimpleNamespace(name="sales")
+        rel.trino_catalog.get_trino_info.return_value = {
+            "trino_url": "trino:443",
+            "trino_catalogs": [catalog],
+        }
+        rel.trino_catalog.get_credentials.return_value = ("user", "pass")
+        mock_ls.side_effect = [_AuthenticationError("expired"), {}]
+        mock_list.return_value = []
+        mock_create.return_value = "urn:new"
+
+        with patch("relations.trino._create_access_token", return_value="new-tok"):
+            rel._reconcile_ingestions()
+
+        assert mock_ls.call_count == 2
+        mock_create.assert_called_once()

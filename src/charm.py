@@ -275,6 +275,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             event: The event triggered when the configuration is changed.
         """
         self.unit.status = ops.WaitingStatus("configuring application")
+        self._reconcile_trino_if_ready()
         self._update(event)
 
     @log_event_handler(logger)
@@ -303,7 +304,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self._update(event)
 
     @log_event_handler(logger)
-    def _on_update_status(self, event):  # noqa C901
+    def _on_update_status(self, event):  # noqa C901  # pylint: disable=R0915
         """Handle `update-status` events.
 
         Args:
@@ -364,7 +365,21 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
+            self._reconcile_trino_if_ready()
             self.unit.status = ops.ActiveStatus()
+
+    def _reconcile_trino_if_ready(self):
+        """Run Trino ingestion reconciliation if preconditions are met."""
+        if not self.unit.is_leader():
+            return
+        if not self._state.is_ready():
+            return
+        if not self.model.get_relation("trino-catalog"):
+            return
+        try:
+            self.trino_relation._reconcile_ingestions()
+        except Exception as e:
+            logger.error("Trino reconciliation failed: %s", str(e))
 
     def _check_state(self):
         """Check the current state of the relations and overall charm readiness.
