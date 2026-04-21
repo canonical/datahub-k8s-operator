@@ -173,8 +173,8 @@ class TestHelpers:
 class TestTrinoRelationAuth:
     """Tests for TrinoRelation auth lifecycle properties."""
 
-    def test_access_token_created_lazily(self):
-        """Access token is lazily created via _create_access_token."""
+    def _make_auth_relation(self):
+        """Create TrinoRelation with mocked charm for auth tests."""
         with patch("relations.trino.TrinoCatalogRequirer"):
             charm = MagicMock()
             charm.system_client_id = "__datahub_system"
@@ -184,13 +184,32 @@ class TestTrinoRelationAuth:
             rel = TrinoRelation.__new__(TrinoRelation)
             rel.charm = charm
             rel._access_token = None
+        return rel
 
-        with patch("relations.trino._create_access_token", return_value="tok-abc") as mock_create:
+    def test_access_token_created_when_no_stored(self):
+        """Access token is created and persisted when nothing is stored."""
+        rel = self._make_auth_relation()
+        with (
+            patch.object(rel, "_get_stored_access_token", return_value=None),
+            patch.object(rel, "_store_access_token") as mock_store,
+            patch("relations.trino._create_access_token", return_value="tok-abc") as mock_create,
+        ):
             first = rel.access_token
             second = rel.access_token
             assert first == "tok-abc"
             assert second == "tok-abc"
             mock_create.assert_called_once_with("__datahub_system", "test-secret")
+            mock_store.assert_called_once_with("tok-abc")
+
+    def test_access_token_reused_from_store(self):
+        """Stored token is reused without calling _create_access_token."""
+        rel = self._make_auth_relation()
+        with (
+            patch.object(rel, "_get_stored_access_token", return_value="stored-tok"),
+            patch("relations.trino._create_access_token") as mock_create,
+        ):
+            assert rel.access_token == "stored-tok"  # nosec B105
+            mock_create.assert_not_called()
 
 
 class TestTrinoRelationEvents:
@@ -468,7 +487,7 @@ class TestAuthRetry:  # pylint: disable=too-many-positional-arguments
     def test_reconcile_retries_on_auth_error(
         self, mock_ls, _mock_es, mock_list, mock_create, _mock_update, _mock_delete
     ):
-        """Reconcile clears token and retries once on auth failure."""
+        """Reconcile creates a fresh token, persists it, and retries on auth failure."""
         rel = self._make_relation()
         catalog = SimpleNamespace(name="sales")
         rel.trino_catalog.get_trino_info.return_value = {
@@ -480,8 +499,12 @@ class TestAuthRetry:  # pylint: disable=too-many-positional-arguments
         mock_list.return_value = []
         mock_create.return_value = "urn:new"
 
-        with patch("relations.trino._create_access_token", return_value="new-tok"):
+        with (
+            patch("relations.trino._create_access_token", return_value="new-tok"),
+            patch.object(rel, "_store_access_token") as mock_store,
+        ):
             rel._reconcile_ingestions()
 
         assert mock_ls.call_count == 2
         mock_create.assert_called_once()
+        mock_store.assert_called_once_with("new-tok")

@@ -579,15 +579,62 @@ class TrinoRelation(framework.Object):
 
         self._access_token: Optional[str] = None  # type: ignore[annotation-unchecked]
 
+    def _get_stored_access_token(self) -> Optional[str]:
+        """Retrieve the persisted access token from the Juju secret store.
+
+        Returns:
+            The stored token string, or None if not yet persisted.
+        """
+        relation = self.charm.model.get_relation("peer")
+        if not relation:
+            return None
+        secret_id = relation.data[self.charm.app].get(literals.INGESTION_TOKEN_SECRET_LABEL)
+        if not secret_id:
+            return None
+        secret = self.charm.model.get_secret(id=secret_id)
+        return secret.peek_content().get("token")
+
+    def _store_access_token(self, token: str) -> None:
+        """Persist an access token in the Juju secret store.
+
+        Creates the secret on first call; updates the existing secret on subsequent calls.
+
+        Args:
+            token: The access token to store.
+        """
+        relation = self.charm.model.get_relation("peer")
+        if not relation:
+            return
+        content = {"token": token}
+        secret_id = relation.data[self.charm.app].get(literals.INGESTION_TOKEN_SECRET_LABEL)
+        if secret_id:
+            secret = self.charm.model.get_secret(id=secret_id)
+            secret.set_content(content)
+        else:
+            secret = self.charm.app.add_secret(content, label=literals.INGESTION_TOKEN_SECRET_LABEL)
+            relation.data[self.charm.app][literals.INGESTION_TOKEN_SECRET_LABEL] = secret.id
+
     @property
     def access_token(self) -> str:
         """Return (and lazily create) a DataHub access token for ingestion.
 
+        Checks the in-memory cache first, then the Juju secret store,
+        and only creates a new token via the DataHub API as a last resort.
+
         Raises:
             RuntimeError: If token creation fails.
         """
-        if self._access_token is None:
-            self._access_token = _create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+        if self._access_token is not None:
+            return self._access_token
+
+        stored = self._get_stored_access_token()
+        if stored:
+            self._access_token = stored
+            return self._access_token
+
+        token = _create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+        self._access_token = token
+        self._store_access_token(token)
         return self._access_token
 
     @log_event_handler(logger)
@@ -695,6 +742,9 @@ class TrinoRelation(framework.Object):
                 if attempt == 0:
                     logger.info("Authentication failed, refreshing token and retrying")
                     self._access_token = None
+                    token = _create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+                    self._access_token = token
+                    self._store_access_token(token)
                     continue
                 logger.error("Authentication failed after token refresh")
             except Exception as e:
