@@ -118,6 +118,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.peer_relation_changed, self._on_peer_relation_changed)
         self.framework.observe(self.on.update_status, self._on_update_status)
+        self.framework.observe(self.on.get_password_action, self._on_get_password_action)
         self.framework.observe(self.on.reindex_action, self._on_reindex_action)
 
         # TODO (mertalpt): Can we make db/topic/index names dynamic to allow
@@ -165,7 +166,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Frontend service requires a file to be present at startup.
         if event.workload.name == services.FrontendService.name:
             self._state.frontend_truststore_initialized = False
-            password = self._generated_password()
+            password = self._ensure_password()
             if not password:
                 logger.info("could not generate admin password, will defer frontend initialization")
                 event.defer()
@@ -226,6 +227,25 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 "output": "Observe reindexing progress on 'datahub-gms' container logs.",
             }
         event.set_results(result)
+
+    @log_event_handler(logger)
+    def _on_get_password_action(self, event):
+        """Return the auto-generated initial admin password.
+
+        Args:
+            event: The event triggered when the action is triggered.
+        """
+        try:
+            password = self._get_password()
+        except (ops.SecretNotFoundError, ops.ModelError) as e:
+            event.fail(f"cannot read password secret: {e}")
+            return
+
+        if not password:
+            event.fail("admin password has not been generated yet")
+            return
+
+        event.set_results({"password": password})
 
     @log_event_handler(logger)
     def _on_config_changed(self, event):
@@ -346,6 +366,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 f"({encryption_keys_secret_id}): {e}; "
                 "ensure the secret has been granted to this application"
             ) from None
+
         if "" in (
             content.get("gms-key", ""),
             content.get("frontend-key", ""),
@@ -366,24 +387,32 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             err = f"missing required relation(s): {', '.join(missing_relations)}"
             raise exceptions.UnreadyStateError(err)
 
-    # Ref: https://github.com/jnsgruk/zinc-k8s-operator/blob/b1d5d9b19628480e2f8c3774d055b966fbb9e7ab/src/charm.py#L78  # noqa
-    def _generated_password(self):
-        """Report the generated admin passport; generate one if it does not exist."""
-        # If the peer relation is not ready, just return an empty string
+    def _get_password(self):
+        """Return the existing admin password, or None if it has not been generated yet."""
+        relation = self.model.get_relation("peer")
+        if not relation:
+            return None
+
+        secret_id = relation.data[self.app].get(literals.INIT_PWD_SECRET_LABEL, None)
+        if not secret_id:
+            return None
+
+        secret = self.model.get_secret(id=secret_id)
+        return secret.peek_content().get("password") or None
+
+    def _ensure_password(self):
+        """Return the admin password, generating one on the leader if it does not exist yet."""
+        password = self._get_password()
+        if password:
+            return password
+
         relation = self.model.get_relation("peer")
         if not relation:
             return ""
 
-        # If the secret already exists, grab its content and return it
-        secret_id = relation.data[self.app].get(literals.INIT_PWD_SECRET_LABEL, None)
-        if secret_id:
-            secret = self.model.get_secret(id=secret_id)
-            return secret.peek_content().get("password")
-
         if self.unit.is_leader():
             content = {"password": secrets.token_urlsafe(24)}
             secret = self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
-            # Store the secret id in the peer relation for other units if required
             relation.data[self.app][literals.INIT_PWD_SECRET_LABEL] = secret.id
             return content["password"]
 

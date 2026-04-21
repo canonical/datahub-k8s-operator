@@ -131,6 +131,8 @@ config:
       default: false
 
 actions:
+  get-password:
+    description: Return the auto-generated initial admin password.
   reindex:
     description: Rebuild search and graph indices from metadata store.
     params:

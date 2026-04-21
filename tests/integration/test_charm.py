@@ -12,22 +12,17 @@ import jubilant
 import pytest
 import requests
 
-import literals
-
 logger = logging.getLogger(__name__)
 
 
 def _get_password(juju: jubilant.Juju) -> str:
-    """Get admin password from Juju secret."""
-    for secret in juju.secrets():
-        if secret.owner != helpers.APP_NAME or secret.label != literals.INIT_PWD_SECRET_LABEL:
-            continue
-        revealed = juju.show_secret(secret.uri, reveal=True)
-        password = revealed.content.get("password", "")
-        if password:
-            logger.info("Fetched admin password from secret '%s'", secret.uri)
-            return password
-    raise ValueError(f"Password secret with label '{literals.INIT_PWD_SECRET_LABEL}' not found")
+    """Get admin password via the get-password action."""
+    action_output = juju.run(f"{helpers.APP_NAME}/0", "get-password", wait=60)
+    password = action_output.results.get("password", "")
+    if not password:
+        raise ValueError("get-password action did not return a password")
+    logger.info("Fetched admin password via get-password action")
+    return password
 
 
 @pytest.fixture(scope="module")

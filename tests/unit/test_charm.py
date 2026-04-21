@@ -10,6 +10,42 @@ import pytest
 from ops import testing
 
 import exceptions
+from charm import DatahubK8SOperatorCharm
+
+
+class TestGetPasswordAction:
+    """Tests for the get-password action handler."""
+
+    def test_returns_password_when_secret_exists(self, charm_ctx, base_state):
+        """get-password returns the stored password."""
+        with patch.object(DatahubK8SOperatorCharm, "_get_password", return_value="s3cret"):
+            charm_ctx.run(charm_ctx.on.action("get-password"), base_state)
+
+        assert charm_ctx.action_results == {"password": "s3cret"}  # nosec B105
+
+    def test_fails_when_password_not_generated(self, charm_ctx, base_state):
+        """get-password fails when the password has not been generated yet."""
+        with patch.object(DatahubK8SOperatorCharm, "_get_password", return_value=None):
+            with pytest.raises(testing.ActionFailed) as exc_info:
+                charm_ctx.run(charm_ctx.on.action("get-password"), base_state)
+
+        assert "not been generated" in exc_info.value.message
+
+    def test_fails_on_secret_not_found(self, charm_ctx, base_state):
+        """get-password fails when the secret cannot be found."""
+        with patch.object(DatahubK8SOperatorCharm, "_get_password", side_effect=ops.SecretNotFoundError("gone")):
+            with pytest.raises(testing.ActionFailed) as exc_info:
+                charm_ctx.run(charm_ctx.on.action("get-password"), base_state)
+
+        assert "cannot read password secret" in exc_info.value.message
+
+    def test_fails_on_model_error(self, charm_ctx, base_state):
+        """get-password fails when the model raises an error reading the secret."""
+        with patch.object(DatahubK8SOperatorCharm, "_get_password", side_effect=ops.ModelError("permission denied")):
+            with pytest.raises(testing.ActionFailed) as exc_info:
+                charm_ctx.run(charm_ctx.on.action("get-password"), base_state)
+
+        assert "cannot read password secret" in exc_info.value.message
 
 
 class TestCheckStateSecretAccess:
