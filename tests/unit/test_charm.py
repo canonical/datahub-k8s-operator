@@ -12,6 +12,8 @@ from ops import testing
 import exceptions
 from charm import DatahubK8SOperatorCharm
 
+_SECRET_ID = "test-encryption-secret-id"  # nosec B105
+
 
 class TestGetPasswordAction:
     """Tests for the get-password action handler."""
@@ -94,6 +96,48 @@ class TestCheckStateSecretAccess:
                 "get_secret",
                 side_effect=ops.ModelError("permission denied"),
             ):
+                state_out = mgr.run()
+
+        assert isinstance(state_out.unit_status, testing.BlockedStatus)
+        assert "encryption-keys-secret-id" in state_out.unit_status.message
+
+
+class TestSecretChanged:
+    """Tests for the _on_secret_changed handler."""
+
+    def test_secret_changed_calls_update_for_configured_secret(self, charm_ctx, base_state):
+        """_on_secret_changed delegates to _update when the configured encryption secret changes."""  # noqa W505
+        secret = testing.Secret(
+            tracked_content={"gms-key": "a", "frontend-key": "b"},
+            label="datahub-encryption-keys",
+        )
+        state = testing.State(config=base_state.config, secrets=[secret])
+
+        with patch.object(DatahubK8SOperatorCharm, "_update") as mock_update:
+            charm_ctx.run(charm_ctx.on.secret_changed(secret), state)
+
+        mock_update.assert_called_once()
+
+    def test_secret_changed_ignores_unrelated_secret(self, charm_ctx, base_state):
+        """_on_secret_changed does nothing for secrets other than the configured encryption key."""
+        unrelated_secret = testing.Secret(tracked_content={"some": "data"}, label="something-else")
+        state = testing.State(config=base_state.config, secrets=[unrelated_secret])
+
+        with patch.object(DatahubK8SOperatorCharm, "_update") as mock_update:
+            charm_ctx.run(charm_ctx.on.secret_changed(unrelated_secret), state)
+
+        mock_update.assert_not_called()
+
+    def test_secret_changed_blocks_on_inaccessible_secret(self, charm_ctx, base_state):
+        """_on_secret_changed sets BlockedStatus when the configured secret is inaccessible."""
+        secret = testing.Secret(
+            tracked_content={"gms-key": "a", "frontend-key": "b"},
+            label="datahub-encryption-keys",
+        )
+        state = testing.State(config=base_state.config, secrets=[secret])
+
+        with charm_ctx(charm_ctx.on.secret_changed(secret), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", side_effect=ops.SecretNotFoundError("not found")):
                 state_out = mgr.run()
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)

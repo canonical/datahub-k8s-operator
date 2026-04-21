@@ -9,7 +9,8 @@ PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
 GMS_PORT = 8080
 
-INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec
+INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
+ENCRYPTION_KEYS_SECRET_LABEL = "datahub-encryption-keys"  # nosec B105
 
 # Paths for scripts baked into the rocks (see datahub_rocks/shared/scripts/).
 RUNNER_PATH = "/charm-scripts/runner.sh"

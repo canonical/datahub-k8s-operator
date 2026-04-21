@@ -116,6 +116,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         for service in SERVICES:
             self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.secret_changed, self._on_secret_changed)
         self.framework.observe(self.on.peer_relation_changed, self._on_peer_relation_changed)
         self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.get_password_action, self._on_get_password_action)
@@ -258,6 +259,17 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self._update(event)
 
     @log_event_handler(logger)
+    def _on_secret_changed(self, event):
+        """Handle secret-changed events for the configured encryption secret.
+
+        Args:
+            event: The secret-changed event fired by Juju.
+        """
+        if event.secret.label != literals.ENCRYPTION_KEYS_SECRET_LABEL:
+            return
+        self._update(event)
+
+    @log_event_handler(logger)
     def _on_peer_relation_changed(self, event):
         """Handle peer relation changed event.
 
@@ -352,7 +364,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Validate secret schema.
         encryption_keys_secret_id = self.config.encryption_keys_secret_id
         try:
-            encryption_keys_secret = self.model.get_secret(id=encryption_keys_secret_id)
+            encryption_keys_secret = self.model.get_secret(
+                id=encryption_keys_secret_id, label=literals.ENCRYPTION_KEYS_SECRET_LABEL
+            )
             content = encryption_keys_secret.get_content(refresh=True)
         except ops.SecretNotFoundError:
             raise exceptions.UnreadyStateError(
