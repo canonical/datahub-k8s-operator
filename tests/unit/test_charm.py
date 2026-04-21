@@ -62,7 +62,7 @@ class TestCheckStateSecretAccess:
 
         msg = str(exc_info.value)
         assert "encryption-keys-secret-id" in msg
-        assert "grant" in msg.lower()
+        assert "not found" in msg.lower()
 
     def test_check_state_raises_unready_on_model_error(self, charm_ctx, base_state):
         """_check_state raises UnreadyStateError when ops raises ModelError reading the secret."""
@@ -77,7 +77,7 @@ class TestCheckStateSecretAccess:
 
         msg = str(exc_info.value)
         assert "encryption-keys-secret-id" in msg
-        assert "grant" in msg.lower()
+        assert "permission denied" in msg.lower()
 
     def test_update_status_blocks_on_secret_not_found(self, charm_ctx, base_state):
         """_on_update_status sets BlockedStatus when the encryption secret cannot be found."""

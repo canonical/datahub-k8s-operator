@@ -369,17 +369,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             )
             content = encryption_keys_secret.get_content(refresh=True)
         except ops.SecretNotFoundError:
-            raise exceptions.UnreadyStateError(
-                "secret pointed to by 'encryption-keys-secret-id' "
-                f"({encryption_keys_secret_id}) was not found; "
-                "ensure the secret exists and has been granted to this application"
-            ) from None
-        except ops.ModelError as e:
-            raise exceptions.UnreadyStateError(
-                "cannot read secret pointed to by 'encryption-keys-secret-id' "
-                f"({encryption_keys_secret_id}): {e}; "
-                "ensure the secret has been granted to this application"
-            ) from None
+            raise exceptions.UnreadyStateError("secret for 'encryption-keys-secret-id': not found") from None
+        except ops.ModelError:
+            raise exceptions.UnreadyStateError("secret for 'encryption-keys-secret-id': permission denied") from None
 
         if "" in (
             content.get("gms-key", ""),
