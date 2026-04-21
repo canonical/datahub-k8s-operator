@@ -12,6 +12,7 @@ GMS_PORT = 8080
 INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
 ENCRYPTION_KEYS_SECRET_LABEL = "datahub-encryption-keys"  # nosec B105
 SYSTEM_CLIENT_SECRET_LABEL = "datahub-system-client-secret"  # nosec B105
+INGESTION_TOKEN_SECRET_LABEL = "datahub-ingestion-token"  # nosec B105
 
 # Paths for scripts baked into the rocks (see datahub_rocks/shared/scripts/).
 RUNNER_PATH = "/charm-scripts/runner.sh"
