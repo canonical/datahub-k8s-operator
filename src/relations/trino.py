@@ -121,6 +121,35 @@ def _build_managed_extra_args() -> List[Dict[str, str]]:
     return [{"key": "extra_env_vars", "value": json.dumps(env_vars)}]
 
 
+def _extract_patterns(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract filter patterns from an existing ingestion source's recipe.
+
+    Args:
+        source: Ingestion source dict from the GraphQL response.
+
+    Returns:
+        Patterns dict with keys like "schema-pattern", or None if not parseable.
+    """
+    recipe_str = source.get("config", {}).get("recipe")
+    if not recipe_str:
+        return None
+    try:
+        recipe = json.loads(recipe_str)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    config = recipe.get("source", {}).get("config", {})
+    key_map = {
+        "schema_pattern": "schema-pattern",
+        "table_pattern": "table-pattern",
+        "view_pattern": "view-pattern",
+    }
+    patterns = {}
+    for recipe_key, pattern_key in key_map.items():
+        if recipe_key in config:
+            patterns[pattern_key] = config[recipe_key]
+    return patterns or None
+
+
 def _normalize_secret_name(catalog_name: str) -> str:
     """Build a DataHub secret name for a catalog's Trino password.
 
@@ -134,7 +163,11 @@ def _normalize_secret_name(catalog_name: str) -> str:
     return f"{TRINO_PASSWORD_SECRET_PREFIX}{normalized}"
 
 
-def _build_recipe(catalog_name: str, params: "_IngestionParams") -> str:
+def _build_recipe(
+    catalog_name: str,
+    params: "_IngestionParams",
+    patterns_override: Optional[Dict[str, Any]] = None,
+) -> str:
     """Build a DataHub ingestion recipe YAML string for a Trino catalog.
 
     Credentials are referenced via DataHub-managed secret placeholders
@@ -143,12 +176,13 @@ def _build_recipe(catalog_name: str, params: "_IngestionParams") -> str:
     Args:
         catalog_name: Trino catalog name (used as the database field).
         params: Common ingestion parameters.
+        patterns_override: If provided, use these patterns instead of params.trino_patterns.
 
     Returns:
         JSON-encoded recipe string.
     """
     default_pattern = {"allow": [".*"], "deny": []}
-    patterns = params.trino_patterns
+    patterns = patterns_override if patterns_override is not None else params.trino_patterns
     recipe = {
         "source": {
             "type": "trino",
@@ -178,9 +212,6 @@ def _build_recipe(catalog_name: str, params: "_IngestionParams") -> str:
 def _filter_juju_managed(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter ingestion sources to those marked as Juju-managed.
 
-    Supports both the current extra_env_vars JSON format and the legacy
-    top-level JUJU_MANAGED key for migration compatibility.
-
     Args:
         sources: List of ingestion source dicts from the GraphQL response.
 
@@ -191,20 +222,15 @@ def _filter_juju_managed(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for source in sources:
         extra_args = source.get("config", {}).get("extraArgs") or []
         for arg in extra_args:
-            key = arg.get("key")
-            # Current format: JUJU_MANAGED inside extra_env_vars JSON
-            if key == "extra_env_vars":
-                try:
-                    env_vars = json.loads(arg.get("value", "{}"))
-                    if env_vars.get(JUJU_MANAGED_KEY) == "true":
-                        managed.append(source)
-                        break
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            # Legacy format: top-level JUJU_MANAGED key
-            if key == JUJU_MANAGED_KEY and arg.get("value") == "True":
-                managed.append(source)
-                break
+            if arg.get("key") != "extra_env_vars":
+                continue
+            try:
+                env_vars = json.loads(arg.get("value", "{}"))
+                if env_vars.get(JUJU_MANAGED_KEY) == "true":
+                    managed.append(source)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Malformed extra_env_vars JSON in source '%s'", source.get("name"))
+            break
     return managed
 
 
@@ -236,7 +262,7 @@ def _create_ingestion_source(
         },
         "config": {
             "recipe": recipe,
-            "executorId": "default",
+            "executorId": literals.DEFAULT_EXECUTOR_ID,
             "extraArgs": extra_args_list,
         },
     }
@@ -251,7 +277,7 @@ def _update_ingestion_source(
 ) -> None:
     """Update credentials and proxy vars of an existing ingestion source.
 
-    Preserves name, type, description, schedule, and other settings.
+    Preserves name, type, description, schedule, patterns, and other settings.
 
     Args:
         bearer_token: Bearer token for authentication.
@@ -259,11 +285,25 @@ def _update_ingestion_source(
         existing_source: Current source dict from listIngestionSources.
         params: Common ingestion parameters.
     """
-    recipe = _build_recipe(_extract_catalog_from_name(existing_source["name"]), params)
+    existing_patterns = _extract_patterns(existing_source)
+    recipe = _build_recipe(
+        _extract_catalog_from_name(existing_source["name"]),
+        params,
+        patterns_override=existing_patterns,
+    )
 
     # Preserve non-managed extraArgs; replace the managed extra_env_vars block atomically.
     existing_extra = existing_source.get("config", {}).get("extraArgs") or []
-    managed_keys = {JUJU_MANAGED_KEY, "extra_env_vars", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
+    managed_keys = {
+        JUJU_MANAGED_KEY,
+        "extra_env_vars",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    }
     preserved = [a for a in existing_extra if a.get("key") not in managed_keys]
     preserved.extend(_build_managed_extra_args())
 
@@ -280,7 +320,7 @@ def _update_ingestion_source(
         "type": existing_source.get("type", "trino"),
         "config": {
             "recipe": recipe,
-            "executorId": existing_source.get("config", {}).get("executorId", "default"),
+            "executorId": existing_source.get("config", {}).get("executorId", literals.DEFAULT_EXECUTOR_ID),
             "extraArgs": preserved,
         },
     }
@@ -346,7 +386,7 @@ class TrinoRelation(framework.Object):
         if not secret_id:
             return None
         secret = self.charm.model.get_secret(id=secret_id)
-        return secret.peek_content().get("token")
+        return secret.get_content(refresh=True).get("token")
 
     def _store_access_token(self, token: str) -> None:
         """Persist an access token in the Juju secret store.
@@ -406,7 +446,7 @@ class TrinoRelation(framework.Object):
             return
 
         self.charm.unit.status = WaitingStatus("handling trino-catalog change")
-        self._reconcile_ingestions()
+        self.reconcile_ingestions()
         self.charm._update(event)
 
     @log_event_handler(logger)
@@ -426,7 +466,7 @@ class TrinoRelation(framework.Object):
         self._cleanup_managed_ingestions()
         self.charm._update(event)
 
-    def _reconcile_ingestions(self) -> None:
+    def reconcile_ingestions(self) -> None:
         """Reconcile Juju-managed Trino ingestion sources with current relation state."""
         trino_info = self.trino_catalog.get_trino_info()
         if not trino_info:
@@ -444,11 +484,7 @@ class TrinoRelation(framework.Object):
         desired_catalogs = {catalog.name for catalog in catalogs}
 
         config = self.charm.config
-        try:
-            trino_patterns = json.loads(config.trino_patterns)
-        except (json.JSONDecodeError, TypeError) as e:
-            logger.error("Invalid trino-patterns config: %s", str(e))
-            return
+        trino_patterns = json.loads(config.trino_patterns)
 
         result = self._prepare_ingestion_state(catalogs, password)
         if result is None:

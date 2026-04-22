@@ -276,6 +276,8 @@ class ActionsService(AbstractService):
             context.charm._state.ran_upgrade,
             utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
             GMSService.is_enabled(context),
+            context.charm.system_client_id,
+            context.charm.system_client_secret,
         )
         return all(checks)
 
