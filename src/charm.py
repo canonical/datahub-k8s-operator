@@ -265,9 +265,14 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The secret-changed event fired by Juju.
         """
-        if event.secret.label != literals.ENCRYPTION_KEYS_SECRET_LABEL:
-            return
-        self._update(event)
+        encryption_keys_secret_id = self.config.encryption_keys_secret_id
+        # ID from the event is in URI format that is painful to handle.
+        # Worst case of a false positive is a redundant `_update` which is no issue.
+        id_match = encryption_keys_secret_id and event.secret.id.endswith(encryption_keys_secret_id)
+        label_match = event.secret.label == literals.ENCRYPTION_KEYS_SECRET_LABEL
+
+        if id_match or label_match:
+            self._update(event)
 
     @log_event_handler(logger)
     def _on_peer_relation_changed(self, event):

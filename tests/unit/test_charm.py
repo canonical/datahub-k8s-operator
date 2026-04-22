@@ -12,8 +12,6 @@ from ops import testing
 import exceptions
 from charm import DatahubK8SOperatorCharm
 
-_SECRET_ID = "test-encryption-secret-id"  # nosec B105
-
 
 class TestGetPasswordAction:
     """Tests for the get-password action handler."""
