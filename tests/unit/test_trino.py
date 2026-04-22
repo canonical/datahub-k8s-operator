@@ -115,24 +115,6 @@ class TestHelpers:
         assert len(result) == 1
         assert result[0]["urn"] == "urn:1"
 
-    def test_filter_juju_managed_legacy_format(self):
-        """Filter includes sources with legacy top-level JUJU_MANAGED=True."""
-        sources = [
-            {
-                "urn": "urn:1",
-                "name": "[juju] a-ingestion",
-                "config": {"extraArgs": [{"key": JUJU_MANAGED_KEY, "value": "True"}]},
-            },
-            {
-                "urn": "urn:2",
-                "name": "manual-source",
-                "config": {"extraArgs": []},
-            },
-        ]
-        result = _filter_juju_managed(sources)
-        assert len(result) == 1
-        assert result[0]["urn"] == "urn:1"
-
     def test_filter_juju_managed_empty_extra_args(self):
         """Filter handles sources with no extraArgs gracefully."""
         sources = [
@@ -317,7 +299,7 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
         mock_list.return_value = []
         mock_create.return_value = "urn:new"
 
-        rel._reconcile_ingestions()
+        rel.reconcile_ingestions()
 
         mock_create.assert_called_once()
         mock_update.assert_not_called()
@@ -343,12 +325,12 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
                 "urn": "urn:existing",
                 "name": "[juju] sales-ingestion",
                 "type": "trino",
-                "config": {"extraArgs": [{"key": JUJU_MANAGED_KEY, "value": "True"}]},
+                "config": {"extraArgs": [{"key": "extra_env_vars", "value": json.dumps({JUJU_MANAGED_KEY: "true"})}]},
                 "schedule": {"interval": "30 3 * * *", "timezone": "UTC"},
             }
         ]
 
-        rel._reconcile_ingestions()
+        rel.reconcile_ingestions()
 
         mock_create.assert_not_called()
         mock_update.assert_called_once()
@@ -373,11 +355,11 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
                 "urn": "urn:old",
                 "name": "[juju] legacy-ingestion",
                 "type": "trino",
-                "config": {"extraArgs": [{"key": JUJU_MANAGED_KEY, "value": "True"}]},
+                "config": {"extraArgs": [{"key": "extra_env_vars", "value": json.dumps({JUJU_MANAGED_KEY: "true"})}]},
             }
         ]
 
-        rel._reconcile_ingestions()
+        rel.reconcile_ingestions()
 
         mock_create.assert_not_called()
         mock_update.assert_not_called()
@@ -394,7 +376,7 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
         rel = self._make_relation()
         rel.trino_catalog.get_trino_info.return_value = None
 
-        rel._reconcile_ingestions()
+        rel.reconcile_ingestions()
 
         mock_list.assert_not_called()
         mock_create.assert_not_called()
@@ -458,14 +440,14 @@ class TestScheduleStability:  # pylint: disable=too-many-positional-arguments
                 "name": "[juju] marketing-ingestion",
                 "type": "trino",
                 "config": {
-                    "extraArgs": [{"key": JUJU_MANAGED_KEY, "value": "True"}],
-                    "executorId": "default",
+                    "extraArgs": [{"key": "extra_env_vars", "value": json.dumps({JUJU_MANAGED_KEY: "true"})}],
+                    "executorId": literals.DEFAULT_EXECUTOR_ID,
                 },
                 "schedule": original_schedule,
             }
         ]
 
-        rel._reconcile_ingestions()
+        rel.reconcile_ingestions()
 
         call_args = mock_update.call_args
         passed_source = call_args[0][2]
@@ -504,7 +486,7 @@ class TestAuthRetry:  # pylint: disable=too-many-positional-arguments
             patch("graphql.create_access_token", return_value="new-tok"),
             patch.object(rel, "_store_access_token") as mock_store,
         ):
-            rel._reconcile_ingestions()
+            rel.reconcile_ingestions()
 
         assert mock_ls.call_count == 2
         mock_create.assert_called_once()

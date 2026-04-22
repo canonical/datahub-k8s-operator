@@ -213,15 +213,23 @@ juju config datahub-k8s trino-patterns='{"schema-pattern":{"allow":[".*"],"deny"
 
 The option is a string for a JSON object that allows setting up allow and deny patterns for each of schema, table, and views.
 
-The DataHub charm will manage the following for the ingestions:
-- Access tokens
-- Trino host and port
-- Trino catalog name
-- HTTP/S proxy variables set via the model config
-- Default patterns set for the initial creation
-- Random schedule set for the initial creation
+The charm creates one ingestion source per Trino catalog with names prefixed by `[juju]`.
 
-Everything else can be updated and the charm will not interfere with the changes.
+On every reconciliation (triggered by relation changes), the charm will overwrite the following fields in each managed ingestion source:
+- Access tokens (stored as DataHub secrets)
+- Trino credentials (username and password, stored as DataHub secrets)
+- Trino host, port, and catalog name
+- HTTP/S proxy variables derived from the model config
+
+The following are set only during the initial creation of an ingestion source and preserved on subsequent updates:
+- Filter patterns from the `trino-patterns` config option
+- A random daily schedule (between 22:00 and 06:00 UTC)
+
+Because patterns are only applied on creation, they can be freely customized via the DataHub UI afterwards. To change the default patterns used for new ingestion sources, update the `trino-patterns` charm config.
+
+The schedule, description, executor, and any non-managed extra arguments can be freely updated via the DataHub UI without interference from the charm.
+
+When a catalog is removed from the Trino relation, its corresponding ingestion source is automatically deleted. When the relation is fully broken, all Juju-managed ingestion sources are cleaned up.
 
 ### Troubleshooting
 

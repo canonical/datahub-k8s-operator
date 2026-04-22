@@ -4,6 +4,7 @@
 
 """Charm the application."""
 
+import json
 import logging
 import secrets
 from typing import Dict, List, Type, Union
@@ -115,9 +116,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         super().__init__(framework)
         self._state = State(self.app, lambda: self.model.get_relation("peer"))
 
-        # DataHub system client credentials (used for programmatic API access).
-        self._system_client_id = literals.SYSTEM_CLIENT_ID
-
         # Services
         for service in SERVICES:
             self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
@@ -159,7 +157,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     @property
     def system_client_id(self) -> str:
         """Return the DataHub system client identifier."""
-        return self._system_client_id
+        return literals.SYSTEM_CLIENT_ID
 
     @property
     def system_client_secret(self) -> str:
@@ -377,7 +375,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         if not self.model.get_relation("trino-catalog"):
             return
         try:
-            self.trino_relation._reconcile_ingestions()
+            self.trino_relation.reconcile_ingestions()
         except Exception as e:
             logger.error("Trino reconciliation failed: %s", str(e))
 
@@ -432,6 +430,15 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             err = f"missing required relation(s): {', '.join(missing_relations)}"
             raise exceptions.UnreadyStateError(err)
 
+        # Validate trino-patterns config is well-formed JSON mapping.
+        # This is to be moved to a Pydantic validation if we switch to that.
+        try:
+            parsed = json.loads(self.config.trino_patterns)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise exceptions.UnreadyStateError(f"invalid 'trino-patterns' config: {e}") from None
+        if not isinstance(parsed, dict):
+            raise exceptions.UnreadyStateError("invalid 'trino-patterns' config: must be a JSON object")
+
     def _get_password(self):
         """Return the existing admin password, or None if it has not been generated yet."""
         relation = self.model.get_relation("peer")
@@ -443,7 +450,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return None
 
         secret = self.model.get_secret(id=secret_id)
-        return secret.peek_content().get("password") or None
+        return secret.get_content(refresh=True).get("password") or None
 
     def _ensure_password(self):
         """Return the admin password, generating one on the leader if it does not exist yet."""
@@ -469,10 +476,10 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         if not relation:
             return ""
 
-        secret_id = relation.data[self.app].get(literals.SYSTEM_CLIENT_SECRET_LABEL, None)
+        secret_id = relation.data[self.app].get(literals.SYSTEM_CLIENT_SECRET_LABEL)
         if secret_id:
             secret = self.model.get_secret(id=secret_id)
-            return secret.peek_content().get("secret")
+            return secret.get_content(refresh=True).get("secret") or ""
 
         if self.unit.is_leader():
             content = {"secret": utils.generate_secret(64)}
