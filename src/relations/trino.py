@@ -11,18 +11,17 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-import requests
 from charms.trino_k8s.v0.trino_catalog import (
     TrinoCatalogRequirer,  # pylint: disable=E0611
 )
 from ops import WaitingStatus, framework
 
+import graphql
 import literals
 from log import log_event_handler
 
 logger = logging.getLogger(__name__)
 
-GRAPHQL_ENDPOINT = f"http://localhost:{literals.GMS_PORT}/api/graphql"
 JUJU_MANAGED_KEY = "JUJU_MANAGED"
 INGESTION_NAME_PREFIX = "[juju] "
 INGESTION_NAME_SUFFIX = "-ingestion"
@@ -176,218 +175,6 @@ def _build_recipe(catalog_name: str, params: "_IngestionParams") -> str:
     return json.dumps(recipe)
 
 
-class _AuthenticationError(RuntimeError):
-    """Raised when a GraphQL request fails due to authentication issues."""
-
-
-def _graphql_request(
-    query: str,
-    variables: Optional[Dict[str, Any]],
-    token: str,
-    auth_scheme: str = "Bearer",
-) -> Dict[str, Any]:
-    """Execute a GraphQL request against the DataHub GMS endpoint.
-
-    Args:
-        query: GraphQL query or mutation string.
-        variables: Optional variables for the query.
-        token: Authentication token or credentials.
-        auth_scheme: HTTP auth scheme (e.g. "Bearer" or "Basic").
-
-    Returns:
-        The parsed JSON response body.
-
-    Raises:
-        _AuthenticationError: If the request fails with a 401/403 or unauthorized GraphQL error.
-        RuntimeError: If the request fails or returns GraphQL errors.
-    """
-    headers = {
-        "Authorization": f"{auth_scheme} {token}",
-        "Content-Type": "application/json",
-    }
-    payload: Dict[str, Any] = {"query": query}
-    if variables:
-        payload["variables"] = variables
-
-    response = requests.post(GRAPHQL_ENDPOINT, json=payload, headers=headers, timeout=30)
-    if response.status_code in (401, 403):
-        raise _AuthenticationError(f"Authentication failed: HTTP {response.status_code}")
-    response.raise_for_status()
-    body = response.json()
-
-    if "errors" in body and body["errors"]:
-        error_str = str(body["errors"])
-        if "unauthorized" in error_str.lower():
-            raise _AuthenticationError(f"GraphQL authentication error: {body['errors']}")
-        raise RuntimeError(f"GraphQL errors: {body['errors']}")
-
-    return body
-
-
-def _create_access_token(system_client_id: str, system_client_secret: str) -> str:
-    """Create a DataHub access token for the system user.
-
-    Uses Basic auth with system client credentials to bootstrap a token.
-
-    Args:
-        system_client_id: DataHub system client identifier.
-        system_client_secret: DataHub system client secret.
-
-    Returns:
-        The generated access token string.
-    """
-    query = """
-    mutation createAccessToken($input: CreateAccessTokenInput!) {
-        createAccessToken(input: $input) {
-            accessToken
-        }
-    }
-    """
-    variables = {
-        "input": {
-            "type": "PERSONAL",
-            "actorUrn": "urn:li:corpuser:__datahub_system",
-            "duration": "NO_EXPIRY",
-            "name": "juju-managed-ingestion-token",
-        }
-    }
-    basic_credentials = f"{system_client_id}:{system_client_secret}"
-    body = _graphql_request(query, variables, basic_credentials, auth_scheme="Basic")
-    return body["data"]["createAccessToken"]["accessToken"]
-
-
-def _list_secrets(bearer_token: str) -> Dict[str, str]:
-    """List all DataHub secrets, returning a name-to-urn mapping.
-
-    Args:
-        bearer_token: Bearer token for authentication.
-
-    Returns:
-        Dictionary mapping secret names to their URNs.
-    """
-    query = """
-    query listSecrets($input: ListSecretsInput!) {
-        listSecrets(input: $input) {
-            total
-            secrets {
-                urn
-                name
-            }
-        }
-    }
-    """
-    start = 0
-    count = 100
-    secrets: Dict[str, str] = {}
-
-    while True:
-        variables = {"input": {"start": start, "count": count}}
-        body = _graphql_request(query, variables, bearer_token)
-        data = body["data"]["listSecrets"]
-        for secret in data.get("secrets", []):
-            secrets[secret["name"]] = secret["urn"]
-        if len(secrets) >= data["total"]:
-            break
-        start += count
-
-    return secrets
-
-
-def _ensure_secret(
-    bearer_token: str,
-    name: str,
-    value: str,
-    existing_secrets: Dict[str, str],
-) -> None:
-    """Create or update a DataHub-managed secret.
-
-    Args:
-        bearer_token: Bearer token for authentication.
-        name: Secret name (used as reference in recipes).
-        value: Secret plaintext value.
-        existing_secrets: Current name-to-urn mapping from _list_secrets.
-    """
-    urn = existing_secrets.get(name)
-    if urn:
-        query = """
-        mutation updateSecret($input: UpdateSecretInput!) {
-            updateSecret(input: $input)
-        }
-        """
-        variables = {
-            "input": {
-                "urn": urn,
-                "name": name,
-                "value": value,
-                "description": "Managed by Juju",
-            }
-        }
-    else:
-        query = """
-        mutation createSecret($input: CreateSecretInput!) {
-            createSecret(input: $input)
-        }
-        """
-        variables = {
-            "input": {
-                "name": name,
-                "value": value,
-                "description": "Managed by Juju",
-            }
-        }
-    _graphql_request(query, variables, bearer_token)
-
-
-def _list_ingestion_sources(bearer_token: str) -> List[Dict[str, Any]]:
-    """Fetch all ingestion sources from DataHub.
-
-    Args:
-        bearer_token: Bearer token for authentication.
-
-    Returns:
-        List of ingestion source dictionaries.
-    """
-    query = """
-    query listIngestionSources($input: ListIngestionSourcesInput!) {
-        listIngestionSources(input: $input) {
-            total
-            ingestionSources {
-                urn
-                name
-                type
-                config {
-                    recipe
-                    executorId
-                    extraArgs {
-                        key
-                        value
-                    }
-                }
-                schedule {
-                    interval
-                    timezone
-                }
-            }
-        }
-    }
-    """
-    start = 0
-    count = 100
-    all_sources: List[Dict[str, Any]] = []
-
-    while True:
-        variables = {"input": {"start": start, "count": count}}
-        body = _graphql_request(query, variables, bearer_token)
-        data = body["data"]["listIngestionSources"]
-        sources = data.get("ingestionSources", [])
-        all_sources.extend(sources)
-        if len(all_sources) >= data["total"]:
-            break
-        start += count
-
-    return all_sources
-
-
 def _filter_juju_managed(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter ingestion sources to those marked as Juju-managed.
 
@@ -436,32 +223,24 @@ def _create_ingestion_source(
     Returns:
         URN of the newly created ingestion source.
     """
-    query = """
-    mutation createIngestionSource($input: UpdateIngestionSourceInput!) {
-        createIngestionSource(input: $input)
-    }
-    """
     recipe = _build_recipe(catalog_name, params)
     extra_args_list = _build_managed_extra_args()
 
-    variables = {
-        "input": {
-            "name": _build_ingestion_name(catalog_name),
-            "type": "trino",
-            "description": f"Juju managed Trino ingestion for {catalog_name}",
-            "schedule": {
-                "interval": _random_daily_schedule(),
-                "timezone": "UTC",
-            },
-            "config": {
-                "recipe": recipe,
-                "executorId": "default",
-                "extraArgs": extra_args_list,
-            },
-        }
+    input_data = {
+        "name": _build_ingestion_name(catalog_name),
+        "type": "trino",
+        "description": f"Juju managed Trino ingestion for {catalog_name}",
+        "schedule": {
+            "interval": _random_daily_schedule(),
+            "timezone": "UTC",
+        },
+        "config": {
+            "recipe": recipe,
+            "executorId": "default",
+            "extraArgs": extra_args_list,
+        },
     }
-    body = _graphql_request(query, variables, bearer_token)
-    return body["data"]["createIngestionSource"]
+    return graphql.create_ingestion_source(bearer_token, input_data)
 
 
 def _update_ingestion_source(
@@ -479,11 +258,6 @@ def _update_ingestion_source(
         urn: URN of the existing ingestion source.
         existing_source: Current source dict from listIngestionSources.
         params: Common ingestion parameters.
-    """
-    query = """
-    mutation updateIngestionSource($urn: String!, $input: UpdateIngestionSourceInput!) {
-        updateIngestionSource(urn: $urn, input: $input)
-    }
     """
     recipe = _build_recipe(_extract_catalog_from_name(existing_source["name"]), params)
 
@@ -513,27 +287,7 @@ def _update_ingestion_source(
     if schedule_input:
         input_data["schedule"] = schedule_input
 
-    variables: Dict[str, Any] = {
-        "urn": urn,
-        "input": input_data,
-    }
-
-    _graphql_request(query, variables, bearer_token)
-
-
-def _delete_ingestion_source(bearer_token: str, urn: str) -> None:
-    """Delete an ingestion source from DataHub.
-
-    Args:
-        bearer_token: Bearer token for authentication.
-        urn: URN of the ingestion source to delete.
-    """
-    query = """
-    mutation deleteIngestionSource($urn: String!) {
-        deleteIngestionSource(urn: $urn)
-    }
-    """
-    _graphql_request(query, {"urn": urn}, bearer_token)
+    graphql.update_ingestion_source(bearer_token, urn, input_data)
 
 
 def _extract_catalog_from_name(name: str) -> str:
@@ -632,7 +386,7 @@ class TrinoRelation(framework.Object):
             self._access_token = stored
             return self._access_token
 
-        token = _create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+        token = graphql.create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
         self._access_token = token
         self._store_access_token(token)
         return self._access_token
@@ -731,18 +485,18 @@ class TrinoRelation(framework.Object):
         for attempt in range(2):
             try:
                 access_token = self.access_token
-                secrets_map = _list_secrets(access_token)
-                _ensure_secret(access_token, GMS_TOKEN_SECRET_NAME, access_token, secrets_map)
+                secrets_map = graphql.list_secrets(access_token)
+                graphql.ensure_secret(access_token, GMS_TOKEN_SECRET_NAME, access_token, secrets_map)
                 for catalog in catalogs:
-                    _ensure_secret(access_token, _normalize_secret_name(catalog.name), password, secrets_map)
-                all_sources = _list_ingestion_sources(access_token)
+                    graphql.ensure_secret(access_token, _normalize_secret_name(catalog.name), password, secrets_map)
+                all_sources = graphql.list_ingestion_sources(access_token)
                 managed = _filter_juju_managed(all_sources)
                 return access_token, managed
-            except _AuthenticationError:
+            except graphql.AuthenticationError:
                 if attempt == 0:
                     logger.info("Authentication failed, refreshing token and retrying")
                     self._access_token = None
-                    token = _create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+                    token = graphql.create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
                     self._access_token = token
                     self._store_access_token(token)
                     continue
@@ -802,7 +556,7 @@ class TrinoRelation(framework.Object):
         for catalog_name in set(existing.keys()) - desired:
             source = existing[catalog_name]
             try:
-                _delete_ingestion_source(bearer, source["urn"])
+                graphql.delete_ingestion_source(bearer, source["urn"])
                 logger.info("Deleted obsolete ingestion source for catalog '%s'", catalog_name)
             except Exception as e:
                 logger.error("Failed to delete ingestion for catalog '%s': %s", catalog_name, str(e))
@@ -811,7 +565,7 @@ class TrinoRelation(framework.Object):
         """Delete all Juju-managed Trino ingestion sources (relation-broken cleanup)."""
         try:
             access_token = self.access_token
-            all_sources = _list_ingestion_sources(access_token)
+            all_sources = graphql.list_ingestion_sources(access_token)
             managed = _filter_juju_managed(all_sources)
         except Exception as e:
             logger.error("Failed to fetch ingestion sources during cleanup: %s", str(e))
@@ -819,7 +573,7 @@ class TrinoRelation(framework.Object):
 
         for source in managed:
             try:
-                _delete_ingestion_source(access_token, source["urn"])
+                graphql.delete_ingestion_source(access_token, source["urn"])
                 logger.info("Cleaned up ingestion source '%s'", source["name"])
             except Exception as e:
                 logger.error("Failed to clean up ingestion '%s': %s", source["name"], str(e))
