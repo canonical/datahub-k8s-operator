@@ -8,11 +8,11 @@ import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from graphql import AuthenticationError
 from relations.trino import (
     GMS_TOKEN_SECRET_NAME,
     JUJU_MANAGED_KEY,
     TrinoRelation,
-    _AuthenticationError,
     _build_ingestion_name,
     _build_managed_extra_args,
     _build_recipe,
@@ -192,7 +192,7 @@ class TestTrinoRelationAuth:
         with (
             patch.object(rel, "_get_stored_access_token", return_value=None),
             patch.object(rel, "_store_access_token") as mock_store,
-            patch("relations.trino._create_access_token", return_value="tok-abc") as mock_create,
+            patch("graphql.create_access_token", return_value="tok-abc") as mock_create,
         ):
             first = rel.access_token
             second = rel.access_token
@@ -206,7 +206,7 @@ class TestTrinoRelationAuth:
         rel = self._make_auth_relation()
         with (
             patch.object(rel, "_get_stored_access_token", return_value="stored-tok"),
-            patch("relations.trino._create_access_token") as mock_create,
+            patch("graphql.create_access_token") as mock_create,
         ):
             assert rel.access_token == "stored-tok"  # nosec B105
             mock_create.assert_not_called()
@@ -298,12 +298,12 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
             rel._access_token = "test-token"  # nosec B105
         return rel
 
-    @patch("relations.trino._delete_ingestion_source")
+    @patch("graphql.delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
-    @patch("relations.trino._ensure_secret")
-    @patch("relations.trino._list_secrets", return_value={})
+    @patch("graphql.list_ingestion_sources")
+    @patch("graphql.ensure_secret")
+    @patch("graphql.list_secrets", return_value={})
     def test_reconcile_creates_missing(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile creates ingestion for catalogs not yet present."""
         rel = self._make_relation()
@@ -322,12 +322,12 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
         mock_update.assert_not_called()
         mock_delete.assert_not_called()
 
-    @patch("relations.trino._delete_ingestion_source")
+    @patch("graphql.delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
-    @patch("relations.trino._ensure_secret")
-    @patch("relations.trino._list_secrets", return_value={})
+    @patch("graphql.list_ingestion_sources")
+    @patch("graphql.ensure_secret")
+    @patch("graphql.list_secrets", return_value={})
     def test_reconcile_updates_existing(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile updates ingestion for catalogs already present."""
         rel = self._make_relation()
@@ -353,12 +353,12 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
         mock_update.assert_called_once()
         mock_delete.assert_not_called()
 
-    @patch("relations.trino._delete_ingestion_source")
+    @patch("graphql.delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
-    @patch("relations.trino._ensure_secret")
-    @patch("relations.trino._list_secrets", return_value={})
+    @patch("graphql.list_ingestion_sources")
+    @patch("graphql.ensure_secret")
+    @patch("graphql.list_secrets", return_value={})
     def test_reconcile_deletes_obsolete(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile deletes ingestion for catalogs no longer in relation."""
         rel = self._make_relation()
@@ -382,12 +382,12 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
         mock_update.assert_not_called()
         mock_delete.assert_called_once_with("test-token", "urn:old")
 
-    @patch("relations.trino._delete_ingestion_source")
+    @patch("graphql.delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
-    @patch("relations.trino._ensure_secret")
-    @patch("relations.trino._list_secrets", return_value={})
+    @patch("graphql.list_ingestion_sources")
+    @patch("graphql.ensure_secret")
+    @patch("graphql.list_secrets", return_value={})
     def test_reconcile_noop_when_synced(self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete):
         """Reconcile makes no changes when state is already in sync (no-op)."""
         rel = self._make_relation()
@@ -400,8 +400,8 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
         mock_update.assert_not_called()
         mock_delete.assert_not_called()
 
-    @patch("relations.trino._delete_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
+    @patch("graphql.delete_ingestion_source")
+    @patch("graphql.list_ingestion_sources")
     def test_cleanup_deletes_all_managed(self, mock_list, mock_delete):
         """Cleanup on relation-broken deletes all Juju-managed sources."""
         rel = self._make_relation()
@@ -433,12 +433,12 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
 class TestScheduleStability:  # pylint: disable=too-many-positional-arguments
     """Tests for schedule-once policy."""
 
-    @patch("relations.trino._delete_ingestion_source")
+    @patch("graphql.delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
-    @patch("relations.trino._ensure_secret")
-    @patch("relations.trino._list_secrets", return_value={})
+    @patch("graphql.list_ingestion_sources")
+    @patch("graphql.ensure_secret")
+    @patch("graphql.list_secrets", return_value={})
     def test_update_preserves_existing_schedule(
         self, _mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete
     ):
@@ -478,12 +478,12 @@ class TestAuthRetry:  # pylint: disable=too-many-positional-arguments
         """Create TrinoRelation wired for auth retry tests."""
         return TestReconciliation()._make_relation()
 
-    @patch("relations.trino._delete_ingestion_source")
+    @patch("graphql.delete_ingestion_source")
     @patch("relations.trino._update_ingestion_source")
     @patch("relations.trino._create_ingestion_source")
-    @patch("relations.trino._list_ingestion_sources")
-    @patch("relations.trino._ensure_secret")
-    @patch("relations.trino._list_secrets")
+    @patch("graphql.list_ingestion_sources")
+    @patch("graphql.ensure_secret")
+    @patch("graphql.list_secrets")
     def test_reconcile_retries_on_auth_error(
         self, mock_ls, _mock_es, mock_list, mock_create, _mock_update, _mock_delete
     ):
@@ -495,12 +495,12 @@ class TestAuthRetry:  # pylint: disable=too-many-positional-arguments
             "trino_catalogs": [catalog],
         }
         rel.trino_catalog.get_credentials.return_value = ("user", "pass")
-        mock_ls.side_effect = [_AuthenticationError("expired"), {}]
+        mock_ls.side_effect = [AuthenticationError("expired"), {}]
         mock_list.return_value = []
         mock_create.return_value = "urn:new"
 
         with (
-            patch("relations.trino._create_access_token", return_value="new-tok"),
+            patch("graphql.create_access_token", return_value="new-tok"),
             patch.object(rel, "_store_access_token") as mock_store,
         ):
             rel._reconcile_ingestions()
