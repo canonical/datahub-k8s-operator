@@ -196,6 +196,33 @@ juju config datahub-k8s tls-secret-name=<k8s-tls-secret-name>
 
 Alternatively, you can use the [Lego](https://charmhub.io/lego) charm to automate certificate management via ACME providers such as Let's Encrypt.
 
+### Integrating to Trino
+
+The DataHub charm supports a relation to the [Trino charm](https://charmhub.io/trino-k8s). The relation allows Datahub to fetch Trino catalogs and set up scheduled metadata ingestions for each catalog.
+
+Set up as follows:
+```sh
+juju deploy trino-k8s --channel latest/edge
+juju relate datahub-k8s trino-k8s
+```
+
+There is a configuration option to set up default patterns for metadata ingestions:
+```sh
+juju config datahub-k8s trino-patterns='{"schema-pattern":{"allow":[".*"],"deny":[]},"table-pattern":{"allow":[".*"],"deny":[]},"view-pattern":{"allow":[".*"],"deny":[]}}'
+```
+
+The option is a string for a JSON object that allows setting up allow and deny patterns for each of schema, table, and views.
+
+The DataHub charm will manage the following for the ingestions:
+- Access tokens
+- Trino host and port
+- Trino catalog name
+- HTTP/S proxy variables set via the model config
+- Default patterns set for the initial creation
+- Random schedule set for the initial creation
+
+Everything else can be updated and the charm will not interfere with the changes.
+
 ### Troubleshooting
 
 - **Opensearch offer blocked**: If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not work. This is best identified by requests to `/graphql` returning a `500` error. Ensure the offer is accepted on the provider side.
