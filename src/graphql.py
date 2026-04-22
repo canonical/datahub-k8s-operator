@@ -82,7 +82,7 @@ def create_access_token(system_client_id: str, system_client_secret: str) -> str
     variables = {
         "input": {
             "type": "PERSONAL",
-            "actorUrn": "urn:li:corpuser:__datahub_system",
+            "actorUrn": f"urn:li:corpuser:{literals.SYSTEM_CLIENT_ID}",
             "duration": "NO_EXPIRY",
             "name": "juju-managed-ingestion-token",
         }

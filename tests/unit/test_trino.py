@@ -8,6 +8,7 @@ import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import literals
 from graphql import AuthenticationError
 from relations.trino import (
     GMS_TOKEN_SECRET_NAME,
@@ -177,7 +178,7 @@ class TestTrinoRelationAuth:
         """Create TrinoRelation with mocked charm for auth tests."""
         with patch("relations.trino.TrinoCatalogRequirer"):
             charm = MagicMock()
-            charm.system_client_id = "__datahub_system"
+            charm.system_client_id = literals.SYSTEM_CLIENT_ID
             charm.system_client_secret = "test-secret"  # nosec B105
             charm.framework = MagicMock()
             charm.on = MagicMock()
@@ -198,7 +199,7 @@ class TestTrinoRelationAuth:
             second = rel.access_token
             assert first == "tok-abc"
             assert second == "tok-abc"
-            mock_create.assert_called_once_with("__datahub_system", "test-secret")
+            mock_create.assert_called_once_with(literals.SYSTEM_CLIENT_ID, "test-secret")
             mock_store.assert_called_once_with("tok-abc")
 
     def test_access_token_reused_from_store(self):
@@ -288,7 +289,7 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
             charm.unit.is_leader.return_value = True
             charm._state.is_ready.return_value = True
             charm.config = SimpleNamespace(trino_patterns=trino_patterns)
-            charm.system_client_id = "__datahub_system"
+            charm.system_client_id = literals.SYSTEM_CLIENT_ID
             charm.system_client_secret = "test-secret"  # nosec B105
             charm.framework = MagicMock()
             charm.on = MagicMock()
