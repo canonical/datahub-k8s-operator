@@ -116,7 +116,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self._state = State(self.app, lambda: self.model.get_relation("peer"))
 
         # DataHub system client credentials (used for programmatic API access).
-        self._system_client_id = "__datahub_system"
+        self._system_client_id = literals.SYSTEM_CLIENT_ID
 
         # Services
         for service in SERVICES:

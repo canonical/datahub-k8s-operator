@@ -7,6 +7,7 @@ import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import literals
 import services
 
 
@@ -47,7 +48,7 @@ def test_actions_compile_environment_includes_proxy_vars():
         charm=SimpleNamespace(
             _state=state,
             config=config,
-            system_client_id="__datahub_system",
+            system_client_id=literals.SYSTEM_CLIENT_ID,
             system_client_secret="my-secret",  # nosec B106
         )
     )
@@ -87,7 +88,7 @@ def test_actions_compile_environment_omits_proxy_vars_when_unset():
         charm=SimpleNamespace(
             _state=state,
             config=config,
-            system_client_id="__datahub_system",
+            system_client_id=literals.SYSTEM_CLIENT_ID,
             system_client_secret="my-secret",  # nosec B106
         )
     )
@@ -146,7 +147,7 @@ def test_gms_compile_environment_includes_system_client():
         _state=state,
         config=config,
         model=model,
-        system_client_id="__datahub_system",
+        system_client_id=literals.SYSTEM_CLIENT_ID,
         system_client_secret="my-secret",  # nosec B106
     )
     context = services.ServiceContext(charm=charm)
@@ -155,7 +156,7 @@ def test_gms_compile_environment_includes_system_client():
         env = services.GMSService.compile_environment(context)
 
     assert env is not None
-    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"
+    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == literals.SYSTEM_CLIENT_ID
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
 
 
@@ -172,7 +173,7 @@ def test_actions_compile_environment_includes_system_client():
     charm = SimpleNamespace(
         _state=state,
         config=config,
-        system_client_id="__datahub_system",
+        system_client_id=literals.SYSTEM_CLIENT_ID,
         system_client_secret="my-secret",  # nosec B106
     )
     context = services.ServiceContext(charm=charm)
@@ -182,7 +183,7 @@ def test_actions_compile_environment_includes_system_client():
             env = services.ActionsService.compile_environment(context)
 
     assert env is not None
-    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"
+    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == literals.SYSTEM_CLIENT_ID
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
 
 
@@ -222,7 +223,7 @@ def test_frontend_compile_environment_includes_system_client():
         _state=state,
         config=config,
         model=model,
-        system_client_id="__datahub_system",
+        system_client_id=literals.SYSTEM_CLIENT_ID,
         system_client_secret="my-secret",  # nosec B106
     )
     context = services.ServiceContext(charm=charm)
@@ -232,5 +233,5 @@ def test_frontend_compile_environment_includes_system_client():
             env = services.FrontendService.compile_environment(context)
 
     assert env is not None
-    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == "__datahub_system"
+    assert env["DATAHUB_SYSTEM_CLIENT_ID"] == literals.SYSTEM_CLIENT_ID
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
