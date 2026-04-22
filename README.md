@@ -196,6 +196,41 @@ juju config datahub-k8s tls-secret-name=<k8s-tls-secret-name>
 
 Alternatively, you can use the [Lego](https://charmhub.io/lego) charm to automate certificate management via ACME providers such as Let's Encrypt.
 
+### Integrating to Trino
+
+The DataHub charm supports a relation to the [Trino charm](https://charmhub.io/trino-k8s). The relation allows Datahub to fetch Trino catalogs and set up scheduled metadata ingestions for each catalog.
+
+Set up as follows:
+```sh
+juju deploy trino-k8s --channel latest/edge
+juju relate datahub-k8s trino-k8s
+```
+
+There is a configuration option to set up default patterns for metadata ingestions:
+```sh
+juju config datahub-k8s trino-patterns='{"schema-pattern":{"allow":[".*"],"deny":[]},"table-pattern":{"allow":[".*"],"deny":[]},"view-pattern":{"allow":[".*"],"deny":[]}}'
+```
+
+The option is a string for a JSON object that allows setting up allow and deny patterns for each of schema, table, and views.
+
+The charm creates one ingestion source per Trino catalog with names prefixed by `[juju]`.
+
+On every reconciliation (triggered by relation changes), the charm will overwrite the following fields in each managed ingestion source:
+- Access tokens (stored as DataHub secrets)
+- Trino credentials (username and password, stored as DataHub secrets)
+- Trino host, port, and catalog name
+- HTTP/S proxy variables derived from the model config
+
+The following are set only during the initial creation of an ingestion source and preserved on subsequent updates:
+- Filter patterns from the `trino-patterns` config option
+- A random daily schedule (between 22:00 and 06:00 UTC)
+
+Because patterns are only applied on creation, they can be freely customized via the DataHub UI afterwards. To change the default patterns used for new ingestion sources, update the `trino-patterns` charm config.
+
+The schedule, description, executor, and any non-managed extra arguments can be freely updated via the DataHub UI without interference from the charm.
+
+When a catalog is removed from the Trino relation, its corresponding ingestion source is automatically deleted. When the relation is fully broken, all Juju-managed ingestion sources are cleaned up.
+
 ### Troubleshooting
 
 - **Opensearch offer blocked**: If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not work. This is best identified by requests to `/graphql` returning a `500` error. Ensure the offer is accepted on the provider side.

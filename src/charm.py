@@ -4,6 +4,7 @@
 
 """Charm the application."""
 
+import json
 import logging
 import secrets
 from typing import Dict, List, Type, Union
@@ -27,6 +28,7 @@ from log import log_event_handler
 from relations.kafka import KafkaRelation
 from relations.opensearch import OpenSearchRelation
 from relations.postgresql import PostgresqlRelation
+from relations.trino import TrinoRelation
 from state import State
 from structured_config import CharmConfig
 
@@ -99,6 +101,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         config_type: Class used to store the config.
         external_fe_hostname: Property for the hostname of the frontend visible to outside.
         external_gms_hostname: Property for the hostname of the GMS visible to outside.
+        system_client_id: The DataHub system client identifier for API auth.
+        system_client_secret: The DataHub system client secret for API auth.
     """
 
     config_type = CharmConfig
@@ -144,8 +148,21 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         )
         self.opensearch_relation = OpenSearchRelation(self)
 
+        # Trino
+        self.trino_relation = TrinoRelation(self)
+
         # Ingress
         self._require_nginx_route()
+
+    @property
+    def system_client_id(self) -> str:
+        """Return the DataHub system client identifier."""
+        return literals.SYSTEM_CLIENT_ID
+
+    @property
+    def system_client_secret(self) -> str:
+        """Return the DataHub system client secret."""
+        return self._get_or_create_system_client_secret()
 
     @property
     def external_fe_hostname(self):
@@ -256,6 +273,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             event: The event triggered when the configuration is changed.
         """
         self.unit.status = ops.WaitingStatus("configuring application")
+        self._reconcile_trino_if_ready()
         self._update(event)
 
     @log_event_handler(logger)
@@ -284,7 +302,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self._update(event)
 
     @log_event_handler(logger)
-    def _on_update_status(self, event):  # noqa C901
+    def _on_update_status(self, event):  # noqa C901  # pylint: disable=R0915
         """Handle `update-status` events.
 
         Args:
@@ -345,7 +363,21 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
+            self._reconcile_trino_if_ready()
             self.unit.status = ops.ActiveStatus()
+
+    def _reconcile_trino_if_ready(self):
+        """Run Trino ingestion reconciliation if preconditions are met."""
+        if not self.unit.is_leader():
+            return
+        if not self._state.is_ready():
+            return
+        if not self.model.get_relation("trino-catalog"):
+            return
+        try:
+            self.trino_relation.reconcile_ingestions()
+        except Exception as e:
+            logger.error("Trino reconciliation failed: %s", str(e))
 
     def _check_state(self):
         """Check the current state of the relations and overall charm readiness.
@@ -398,6 +430,15 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             err = f"missing required relation(s): {', '.join(missing_relations)}"
             raise exceptions.UnreadyStateError(err)
 
+        # Validate trino-patterns config is well-formed JSON mapping.
+        # This is to be moved to a Pydantic validation if we switch to that.
+        try:
+            parsed = json.loads(self.config.trino_patterns)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise exceptions.UnreadyStateError(f"invalid 'trino-patterns' config: {e}") from None
+        if not isinstance(parsed, dict):
+            raise exceptions.UnreadyStateError("invalid 'trino-patterns' config: must be a JSON object")
+
     def _get_password(self):
         """Return the existing admin password, or None if it has not been generated yet."""
         relation = self.model.get_relation("peer")
@@ -409,7 +450,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             return None
 
         secret = self.model.get_secret(id=secret_id)
-        return secret.peek_content().get("password") or None
+        return secret.get_content(refresh=True).get("password") or None
 
     def _ensure_password(self):
         """Return the admin password, generating one on the leader if it does not exist yet."""
@@ -426,6 +467,25 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             secret = self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
             relation.data[self.app][literals.INIT_PWD_SECRET_LABEL] = secret.id
             return content["password"]
+
+        return ""
+
+    def _get_or_create_system_client_secret(self):
+        """Return the system client secret, creating it on the leader if it does not exist."""
+        relation = self.model.get_relation("peer")
+        if not relation:
+            return ""
+
+        secret_id = relation.data[self.app].get(literals.SYSTEM_CLIENT_SECRET_LABEL)
+        if secret_id:
+            secret = self.model.get_secret(id=secret_id)
+            return secret.get_content(refresh=True).get("secret") or ""
+
+        if self.unit.is_leader():
+            content = {"secret": utils.generate_secret(64)}
+            secret = self.app.add_secret(content, label=literals.SYSTEM_CLIENT_SECRET_LABEL)
+            relation.data[self.app][literals.SYSTEM_CLIENT_SECRET_LABEL] = secret.id
+            return content["secret"]
 
         return ""
 

@@ -1,5 +1,6 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+# pylint: disable=C0302
 
 """Define DataHub services."""
 
@@ -275,6 +276,8 @@ class ActionsService(AbstractService):
             context.charm._state.ran_upgrade,
             utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
             GMSService.is_enabled(context),
+            context.charm.system_client_id,
+            context.charm.system_client_secret,
         )
         return all(checks)
 
@@ -320,6 +323,10 @@ class ActionsService(AbstractService):
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
         env.update(_compile_standard_proxy_environment(extra_no_proxy_hosts=["localhost", env["DATAHUB_GMS_HOST"]]))
+
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
+
         return env
 
 
@@ -455,6 +462,9 @@ class FrontendService(AbstractService):
 
         proxy_vars["HTTP_NON_PROXY_HOSTS"] = "|".join(no_proxy_hosts)
         env.update(proxy_vars)
+
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
 
         # Set up OIDC if needed.
         if context.charm.config.oidc_secret_id is None:
@@ -671,6 +681,10 @@ class GMSService(AbstractService):
             env["INDEX_PREFIX"] = context.charm.config.opensearch_index_prefix
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
+
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
+
         return env
 
     @classmethod

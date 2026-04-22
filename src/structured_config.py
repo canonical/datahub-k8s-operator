@@ -3,6 +3,7 @@
 
 """Structured configuration for the charm."""
 
+import json
 import logging
 from typing import Optional
 
@@ -10,6 +11,15 @@ from charms.data_platform_libs.v0.data_models import BaseConfigModel
 from pydantic import field_validator
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PATTERN = {"allow": [".*"], "deny": []}
+_TRINO_PATTERNS_DEFAULT = json.dumps(
+    {
+        "schema-pattern": _DEFAULT_PATTERN,
+        "table-pattern": _DEFAULT_PATTERN,
+        "view-pattern": _DEFAULT_PATTERN,
+    }
+)
 
 
 class CharmConfig(BaseConfigModel):
@@ -26,6 +36,7 @@ class CharmConfig(BaseConfigModel):
         external_fe_hostname: Hostname of frontend visible to outside.
         external_gms_hostname: Hostname of GMS visible to outside.
         tls_secret_name: Name of the k8s secret to use for the TLS certificate.
+        trino_patterns: JSON string with schema, table, and view filter patterns.
     """
 
     auth_verbose_logging: bool = False
@@ -37,6 +48,7 @@ class CharmConfig(BaseConfigModel):
     external_fe_hostname: Optional[str] = None
     external_gms_hostname: Optional[str] = None
     tls_secret_name: Optional[str] = None
+    trino_patterns: str = _TRINO_PATTERNS_DEFAULT
 
     @field_validator("*", mode="before")
     @classmethod
