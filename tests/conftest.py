@@ -19,3 +19,8 @@ def pytest_addoption(parser: pytest.Parser):
     parser.addoption("--datahub-actions-image", action="store")
     parser.addoption("--datahub-frontend-image", action="store")
     parser.addoption("--datahub-gms-image", action="store")
+
+    # Compatibility with canonical/operator-workflows CI after `jubilant` migration.
+    parser.addoption("--model", action="store", default=None)
+    parser.addoption("--keep-models", action="store_true", default=False)
+    parser.addoption("--series", action="store", default=None)
