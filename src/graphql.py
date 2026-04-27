@@ -116,12 +116,13 @@ def list_secrets(bearer_token: str) -> Dict[str, str]:
     secrets: Dict[str, str] = {}
 
     while True:
+        prev_size = len(secrets)
         variables = {"input": {"start": start, "count": count}}
         body = _graphql_request(query, variables, bearer_token)
         data = body["data"]["listSecrets"]
         for secret in data.get("secrets", []):
             secrets[secret["name"]] = secret["urn"]
-        if len(secrets) >= data["total"]:
+        if len(secrets) >= data["total"] or len(secrets) == prev_size:
             break
         start += count
 
@@ -208,12 +209,13 @@ def list_ingestion_sources(bearer_token: str) -> List[Dict[str, Any]]:
     all_sources: List[Dict[str, Any]] = []
 
     while True:
+        prev_size = len(all_sources)
         variables = {"input": {"start": start, "count": count}}
         body = _graphql_request(query, variables, bearer_token)
         data = body["data"]["listIngestionSources"]
         sources = data.get("ingestionSources", [])
         all_sources.extend(sources)
-        if len(all_sources) >= data["total"]:
+        if len(all_sources) >= data["total"] or len(all_sources) == prev_size:
             break
         start += count
 
