@@ -229,7 +229,7 @@ Because patterns are only applied on creation, they can be freely customized via
 
 The schedule, description, executor, and any non-managed extra arguments can be freely updated via the DataHub UI without interference from the charm.
 
-When a catalog is removed from the Trino relation, its corresponding ingestion source is automatically deleted. When the relation is fully broken, all Juju-managed ingestion sources are cleaned up.
+When a catalog is removed from the Trino relation, its corresponding ingestion source is automatically deleted. When the relation is fully broken, all Juju-managed ingestion sources are cleaned up. Note that cleaning the ingestions does not remove already ingested metadata.
 
 ### Troubleshooting
 
