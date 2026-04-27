@@ -235,3 +235,115 @@ def test_frontend_compile_environment_includes_system_client():
     assert env is not None
     assert env["DATAHUB_SYSTEM_CLIENT_ID"] == literals.SYSTEM_CLIENT_ID
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
+
+
+class TestFrontendRunInitialization:
+    """Tests for FrontendService.run_initialization user.props and truststore steps."""
+
+    @staticmethod
+    def _make_context(*, user_props_done=False, truststore_done=False, password="s3cret"):
+        """Build a ServiceContext wired for FrontendService initialization tests."""
+        state = SimpleNamespace(
+            kafka_connection={
+                "bootstrap_server": "k:9092",
+                "username": "u",
+                "password": "p",
+                "initialized": True,
+            },  # nosec B105
+            opensearch_connection={
+                "host": "os",
+                "port": "9200",
+                "username": "u",
+                "password": "p",
+                "tls-ca": "PEM-CERT",
+                "initialized": True,
+            },  # nosec B105
+            ran_upgrade=True,
+            frontend_user_props_initialized=user_props_done,
+            frontend_truststore_initialized=truststore_done,
+        )
+        container = SimpleNamespace(push=lambda *a, **kw: None)
+        unit = SimpleNamespace(get_container=lambda name: container)
+        charm = SimpleNamespace(
+            _state=state,
+            _ensure_password=lambda: password,
+            unit=unit,
+        )
+        return services.ServiceContext(charm=charm)
+
+    def test_pushes_user_props_when_not_done(self):
+        """user.props is pushed and flag is set when not yet initialized."""
+        context = self._make_context(user_props_done=False, truststore_done=True)
+
+        with patch.object(services.FrontendService, "is_ready", return_value=True):
+            result = services.FrontendService.run_initialization(context)
+
+        assert result is True
+        assert context.charm._state.frontend_user_props_initialized is True
+
+    def test_skips_when_already_initialized(self):
+        """Initialization is skipped when both steps are already done."""
+        context = self._make_context(user_props_done=True, truststore_done=True)
+
+        with patch.object(services.FrontendService, "is_ready", return_value=True):
+            result = services.FrontendService.run_initialization(context)
+
+        assert result is False
+
+    def test_returns_false_when_password_unavailable(self):
+        """Returns False without setting flag when password is empty."""
+        context = self._make_context(user_props_done=False, truststore_done=True, password="")  # nosec B106
+
+        with patch.object(services.FrontendService, "is_ready", return_value=True):
+            result = services.FrontendService.run_initialization(context)
+
+        assert result is False
+        assert context.charm._state.frontend_user_props_initialized is False
+
+
+class TestGMSSetWorkloadVersion:
+    """Tests for GMSService._set_workload_version."""
+
+    @staticmethod
+    def _make_context(*, version_set=False):
+        """Build a ServiceContext wired for GMS workload version tests."""
+        state = SimpleNamespace(gms_workload_version_set=version_set)
+        version_holder = SimpleNamespace(value=None)
+        unit = SimpleNamespace(
+            get_container=lambda name: SimpleNamespace(pull=lambda path: "version: '1.4.0.5'"),
+            set_workload_version=lambda v: setattr(version_holder, "value", v),
+        )
+        charm = SimpleNamespace(_state=state, unit=unit)
+        context = services.ServiceContext(charm=charm)
+        return context, version_holder
+
+    def test_sets_version_when_flag_unset(self):
+        """Workload version is set and flag is marked True."""
+        context, holder = self._make_context(version_set=False)
+
+        services.GMSService._set_workload_version(context)
+
+        assert holder.value == "1.4.0.5"
+        assert context.charm._state.gms_workload_version_set is True
+
+    def test_skips_when_flag_already_set(self):
+        """Workload version extraction is skipped when already done."""
+        context, holder = self._make_context(version_set=True)
+
+        services.GMSService._set_workload_version(context)
+
+        assert holder.value is None
+
+    def test_retries_on_failure(self):
+        """Flag stays unset on failure so the operation retries on next call."""
+        state = SimpleNamespace(gms_workload_version_set=False)
+        unit = SimpleNamespace(
+            get_container=lambda name: SimpleNamespace(pull=lambda path: (_ for _ in ()).throw(Exception("not ready"))),
+            set_workload_version=lambda v: None,
+        )
+        charm = SimpleNamespace(_state=state, unit=unit)
+        context = services.ServiceContext(charm=charm)
+
+        services.GMSService._set_workload_version(context)
+
+        assert state.gms_workload_version_set is not True

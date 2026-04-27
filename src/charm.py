@@ -10,7 +10,6 @@ import secrets
 from typing import Dict, List, Type, Union
 
 import ops
-import yaml
 from charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequires,
     KafkaRequires,
@@ -18,7 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
 from charms.nginx_ingress_integrator.v0.nginx_route import require_nginx_route
-from ops.pebble import CheckStatus, PathError
+from ops.pebble import CheckStatus
 
 import exceptions
 import literals
@@ -181,35 +180,12 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: Event instance being handled.
         """
-        # Frontend service requires a file to be present at startup.
         if event.workload.name == services.FrontendService.name:
+            self._state.frontend_user_props_initialized = False
             self._state.frontend_truststore_initialized = False
-            password = self._ensure_password()
-            if not password:
-                logger.info("could not generate admin password, will defer frontend initialization")
-                event.defer()
-            logger.debug("initial admin password generation successful")
-            utils.push_contents_to_file(
-                event.workload,
-                f"datahub:{password}",
-                "/datahub-frontend/conf/user.props",
-                0o644,
-            )
         if event.workload.name == services.GMSService.name:
+            self._state.gms_workload_version_set = False
             self._state.gms_truststore_initialized = False
-            try:
-                container = self.unit.get_container(services.GMSService.name)
-                if not container.can_connect():
-                    raise ValueError(f"Cannot connect to {services.GMSService.name}")
-                meta_file = container.pull("/rockcraft.yaml")
-                meta = yaml.safe_load(meta_file)
-                if meta and "version" in meta:
-                    self.unit.set_workload_version(meta["version"])
-                else:
-                    raise ValueError("Cannot find 'version' in 'rockcraft.yaml'.")
-            except (ops.ModelError, PathError, ValueError, yaml.YAMLError) as e:
-                logger.info("Could not get workload version: %s", str(e))
-                event.defer()
 
         self._update(event)
 
@@ -537,8 +513,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             for service in SERVICES:
                 container = self.unit.get_container(service.name)
                 if not container.can_connect():
-                    logger.info("Cannot connect to service '%s', deferring initialization", service.name)
-                    event.defer()
+                    logger.info("Cannot connect to service '%s', skipping initialization", service.name)
                     return
                 service.run_initialization(context)
         except Exception as e:
@@ -551,8 +526,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         for service in SERVICES:
             container = self.unit.get_container(service.name)
             if not container.can_connect():
-                logger.info("Cannot connect to service '%s', deferring replan", service.name)
-                event.defer()
+                logger.info("Cannot connect to service '%s', skipping replan", service.name)
                 return
 
             pebble_layer = get_pebble_layer(service, context)

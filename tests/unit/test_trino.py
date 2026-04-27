@@ -222,15 +222,16 @@ class TestTrinoRelationEvents:
 
         rel.charm._update.assert_not_called()
 
-    def test_on_changed_defers_when_state_not_ready(self):
-        """Changed event is deferred when peer relation is not ready."""
+    def test_on_changed_returns_when_state_not_ready(self):
+        """Changed event returns without action when peer relation is not ready."""
         rel = self._make_relation()
         rel.charm._state.is_ready.return_value = False
         event = MagicMock()
 
         rel._on_trino_catalog_changed(event)
 
-        event.defer.assert_called_once()
+        event.defer.assert_not_called()
+        rel.charm._update.assert_not_called()
 
     def test_on_broken_skips_non_leader(self):
         """Broken event is skipped when unit is not leader."""
@@ -242,15 +243,16 @@ class TestTrinoRelationEvents:
 
         rel.charm._update.assert_not_called()
 
-    def test_on_broken_defers_when_state_not_ready(self):
-        """Broken event is deferred when peer relation is not ready."""
+    def test_on_broken_returns_when_state_not_ready(self):
+        """Broken event returns without action when peer relation is not ready."""
         rel = self._make_relation()
         rel.charm._state.is_ready.return_value = False
         event = MagicMock()
 
         rel._on_relation_broken(event)
 
-        event.defer.assert_called_once()
+        event.defer.assert_not_called()
+        rel.charm._update.assert_not_called()
 
 
 class TestReconciliation:  # pylint: disable=too-many-positional-arguments

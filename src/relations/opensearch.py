@@ -47,7 +47,6 @@ class OpenSearchRelation(framework.Object):
             return
 
         if not self.charm._state.is_ready():
-            event.defer()
             return
 
         self.charm.unit.status = WaitingStatus(f"handling {event.relation.name} change")
@@ -65,8 +64,7 @@ class OpenSearchRelation(framework.Object):
 
         # Opensearch can fail to create the index, handle by deferring.
         if any((v is None for v in conn.values())):
-            logger.info("missing credentials from the opensearch relation, deferring")
-            event.defer()
+            logger.info("missing credentials from the opensearch relation, returning")
             return
 
         # TODO (mertalpt): Check if it is possible to attach to an uninitialized
@@ -88,7 +86,6 @@ class OpenSearchRelation(framework.Object):
             return
 
         if not self.charm._state.is_ready():
-            event.defer()
             return
 
         self.charm._state.opensearch_connection = None

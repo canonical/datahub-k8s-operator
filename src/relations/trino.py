@@ -442,7 +442,6 @@ class TrinoRelation(framework.Object):
             return
 
         if not self.charm._state.is_ready():
-            event.defer()
             return
 
         self.charm.unit.status = WaitingStatus("handling trino-catalog change")
@@ -460,7 +459,6 @@ class TrinoRelation(framework.Object):
             return
 
         if not self.charm._state.is_ready():
-            event.defer()
             return
 
         self._cleanup_managed_ingestions()
