@@ -21,6 +21,7 @@ from relations.trino import (
     _extract_catalog_from_name,
     _filter_juju_managed,
     _IngestionParams,
+    _is_https,
     _normalize_secret_name,
     _random_daily_schedule,
 )
@@ -124,6 +125,19 @@ class TestHelpers:
         result = _filter_juju_managed(sources)
         assert not result
 
+    def test_is_https_port_443(self):
+        """Port 443 is detected as HTTPS."""
+        assert _is_https("trino.example.com:443") is True
+
+    def test_is_https_non_443_port(self):
+        """Non-443 ports are detected as HTTP."""
+        assert _is_https("trino:8080") is False
+        assert _is_https("trino:8443") is False
+
+    def test_is_https_no_port(self):
+        """URL without a port defaults to HTTP."""
+        assert _is_https("trino.example.com") is False
+
     def test_build_recipe_structure(self):
         """Build recipe produces valid JSON with expected keys and secret references."""
         default_pattern = {"allow": [".*"], "deny": []}
@@ -148,9 +162,29 @@ class TestHelpers:
         assert "column_pattern" not in recipe["source"]["config"]
         assert recipe["source"]["config"]["stateful_ingestion"]["enabled"] is True
         assert recipe["source"]["config"]["env"] == "PROD"
-        # Credentials use DataHub secret references
+        # Credentials use DataHub secret references (HTTPS connection)
         assert recipe["source"]["config"]["password"] == "${JUJU_MANAGED_TRINO_PASSWORD_MY_CATALOG}"
         assert recipe["sink"]["config"]["token"] == f"${{{GMS_TOKEN_SECRET_NAME}}}"
+
+    def test_build_recipe_omits_password_for_http(self):
+        """Build recipe omits the password field when the connection is over HTTP."""
+        default_pattern = {"allow": [".*"], "deny": []}
+        params = _IngestionParams(
+            trino_url="trino:8080",
+            username="user",
+            password="pass",  # nosec
+            access_token="tok123",
+            trino_patterns={
+                "schema-pattern": default_pattern,
+                "table-pattern": default_pattern,
+                "view-pattern": default_pattern,
+            },
+        )
+        recipe_str = _build_recipe("my_catalog", params)
+        recipe = json.loads(recipe_str)
+        assert "password" not in recipe["source"]["config"]
+        assert recipe["source"]["config"]["host_port"] == "trino:8080"
+        assert recipe["source"]["config"]["username"] == "user"
 
 
 class TestTrinoRelationAuth:

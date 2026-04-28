@@ -163,6 +163,27 @@ def _normalize_secret_name(catalog_name: str) -> str:
     return f"{TRINO_PASSWORD_SECRET_PREFIX}{normalized}"
 
 
+def _is_https(trino_url: str) -> bool:
+    """Determine whether a Trino connection uses HTTPS based on the port.
+
+    The catalog interface does not pass the scheme so we determine it
+    based on the current conventions.
+    
+    Args:
+        trino_url: Trino URL in host:port format.
+
+    Returns:
+        True if port is 443, False otherwise.
+    """
+    parts = trino_url.rsplit(":", 1)
+    if len(parts) != 2:
+        return False
+    try:
+        return int(parts[1]) == 443
+    except ValueError:
+        return False
+
+
 def _build_recipe(
     catalog_name: str,
     params: "_IngestionParams",
@@ -183,20 +204,24 @@ def _build_recipe(
     """
     default_pattern = {"allow": [".*"], "deny": []}
     patterns = patterns_override if patterns_override is not None else params.trino_patterns
+    source_config = {
+        "host_port": params.trino_url,
+        "database": catalog_name,
+        "username": params.username,
+        "schema_pattern": patterns.get("schema-pattern", default_pattern),
+        "table_pattern": patterns.get("table-pattern", default_pattern),
+        "view_pattern": patterns.get("view-pattern", default_pattern),
+        "env": "PROD",
+        "stateful_ingestion": {"enabled": True},
+    }
+    # Password only works over HTTPS; omit it for plain HTTP connections.
+    if _is_https(params.trino_url):
+        source_config["password"] = f"${{{_normalize_secret_name(catalog_name)}}}"
+
     recipe = {
         "source": {
             "type": "trino",
-            "config": {
-                "host_port": params.trino_url,
-                "database": catalog_name,
-                "username": params.username,
-                "password": f"${{{_normalize_secret_name(catalog_name)}}}",
-                "schema_pattern": patterns.get("schema-pattern", default_pattern),
-                "table_pattern": patterns.get("table-pattern", default_pattern),
-                "view_pattern": patterns.get("view-pattern", default_pattern),
-                "env": "PROD",
-                "stateful_ingestion": {"enabled": True},
-            },
+            "config": source_config,
         },
         "sink": {
             "type": "datahub-rest",
