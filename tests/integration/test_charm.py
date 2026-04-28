@@ -28,6 +28,9 @@ def _get_password(juju: jubilant.Juju) -> str:
 @pytest.fixture(scope="module")
 def full_stack(k8s_juju: jubilant.Juju, lxd_juju: jubilant.Juju, charm: Path, rock_resources: dict) -> jubilant.Juju:
     """Deploy full dependency stack and return deployed K8s model handle."""
+    logger.info("Deploying '%s'", helpers.APP_NAME)
+    helpers.deploy_charm(k8s_juju, charm, rock_resources)
+
     logger.info("Deploying LXD dependencies")
     lxd_juju.deploy(helpers.KAFKA_NAME, channel=helpers.KAFKA_CHANNEL, revision=helpers.KAFKA_REVISION)
     lxd_juju.deploy(
@@ -78,17 +81,6 @@ def full_stack(k8s_juju: jubilant.Juju, lxd_juju: jubilant.Juju, charm: Path, ro
     lxd_juju.offer(helpers.OPENSEARCH_NAME, endpoint="opensearch-client", name=helpers.OPENSEARCH_OFFER_NAME)
     lxd_juju.offer(helpers.POSTGRES_NAME, endpoint="database", name=helpers.POSTGRES_OFFER_NAME)
 
-    logger.info("Deploying '%s'", helpers.APP_NAME)
-    helpers.deploy_charm(k8s_juju, charm, rock_resources)
-    helpers.wait_for_apps_status(
-        k8s_juju,
-        {
-            helpers.APP_NAME: ("blocked", "waiting", "maintenance", "active"),
-        },
-        timeout=20 * 60,
-        raise_on_error=False,
-    )
-
     lxd_model = helpers.model_short_name(lxd_juju.model or "")
     if not lxd_model:
         raise ValueError("Could not determine LXD model name")
@@ -97,6 +89,16 @@ def full_stack(k8s_juju: jubilant.Juju, lxd_juju: jubilant.Juju, charm: Path, ro
     k8s_juju.consume(f"{lxd_model}.{helpers.KAFKA_OFFER_NAME}")
     k8s_juju.consume(f"{lxd_model}.{helpers.OPENSEARCH_OFFER_NAME}")
     k8s_juju.consume(f"{lxd_model}.{helpers.POSTGRES_OFFER_NAME}")
+
+    logger.info("Waiting for K8s applications to settle")
+    helpers.wait_for_apps_status(
+        k8s_juju,
+        {
+            helpers.APP_NAME: ("blocked", "waiting", "maintenance", "active"),
+        },
+        timeout=20 * 60,
+        raise_on_error=False,
+    )
 
     logger.info("Integrating consumed offers")
     k8s_juju.integrate(f"{helpers.APP_NAME}:kafka", helpers.KAFKA_OFFER_NAME)
@@ -130,15 +132,30 @@ def test_deploy_full(full_stack: jubilant.Juju):
     admin_pwd = _get_password(full_stack)
 
     url = f"{base_url}/logIn"
+    logger.info("Testing against URL: %s", url)
 
     def _can_login(_: jubilant.Status) -> bool:
         """Attempt login and return True on success."""
         try:
             response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
-        except requests.RequestException:
-            return False
-        return response.status_code == 200
 
+            if response.status_code == 200:
+                return True
+
+            logger.info(
+                "Login failed | Status: %d | Body: %s | Headers: %s",
+                response.status_code,
+                response.text[:500],  # Truncate to avoid flooding logs
+                response.headers,
+            )
+            return False
+
+        except requests.RequestException as e:
+            # This catches connection errors, timeouts, and DNS issues
+            logger.info("Login connection error: %s", str(e))
+            return False
+
+    logger.info("Waiting for frontend to be ready")
     full_stack.wait(_can_login, timeout=15 * 60, delay=10, successes=1)
 
     response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)

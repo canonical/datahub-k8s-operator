@@ -45,7 +45,6 @@ class PostgresqlRelation(framework.Object):
             return
 
         if not self.charm._state.is_ready():
-            event.defer()
             return
 
         self.charm.unit.status = WaitingStatus(f"handling {event.relation.name} change")
@@ -80,7 +79,6 @@ class PostgresqlRelation(framework.Object):
             return
 
         if not self.charm._state.is_ready():
-            event.defer()
             return
 
         self.charm._state.database_connection = None

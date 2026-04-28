@@ -1,5 +1,6 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+# pylint: disable=C0302
 
 """Define DataHub services."""
 
@@ -22,6 +23,8 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urlparse
+
+import yaml
 
 import exceptions
 import literals
@@ -275,6 +278,8 @@ class ActionsService(AbstractService):
             context.charm._state.ran_upgrade,
             utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
             GMSService.is_enabled(context),
+            context.charm.system_client_id,
+            context.charm.system_client_secret,
         )
         return all(checks)
 
@@ -320,6 +325,10 @@ class ActionsService(AbstractService):
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
         env.update(_compile_standard_proxy_environment(extra_no_proxy_hosts=["localhost", env["DATAHUB_GMS_HOST"]]))
+
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
+
         return env
 
 
@@ -350,7 +359,10 @@ class FrontendService(AbstractService):
             Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
-        checks = (context.charm._state.frontend_truststore_initialized is True,)
+        checks = (
+            context.charm._state.frontend_user_props_initialized is True,
+            context.charm._state.frontend_truststore_initialized is True,
+        )
         return is_ready and all(checks)
 
     @classmethod
@@ -456,6 +468,9 @@ class FrontendService(AbstractService):
         proxy_vars["HTTP_NON_PROXY_HOSTS"] = "|".join(no_proxy_hosts)
         env.update(proxy_vars)
 
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
+
         # Set up OIDC if needed.
         if context.charm.config.oidc_secret_id is None:
             return env
@@ -491,6 +506,10 @@ class FrontendService(AbstractService):
     def run_initialization(cls, context: ServiceContext) -> bool:
         """Run service specific initialization scripts if service is ready and it is necessary.
 
+        Initialization runs in order:
+        1. Push user.props credential file
+        2. Truststore initialization for Opensearch SSL
+
         Args:
             context: Context for the service.
 
@@ -504,28 +523,38 @@ class FrontendService(AbstractService):
             logger.info("datahub-frontend is not ready to be initialized, skipping initialization")
             return False
 
-        # The only initialization step currently is to set up truststore for Opensearch SSL.
-        check_frontend_truststore = context.charm._state.frontend_truststore_initialized is True
-        if check_frontend_truststore:
+        user_props_done = context.charm._state.frontend_user_props_initialized is True
+        truststore_done = context.charm._state.frontend_truststore_initialized is True
+        if user_props_done and truststore_done:
             logger.debug("datahub-frontend is already initialized, skipping initialization")
             return False
 
-        certificates = context.charm._state.opensearch_connection["tls-ca"]
-
         container = context.charm.unit.get_container(cls.name)
 
-        try:
-            _import_certificates_to_truststore(
-                container,
-                certificates,
-                literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
-            )
-        except Exception as e:
-            logger.info("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
-            raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
+        # Step 1: Push user.props credential file.
+        if not user_props_done:
+            password = context.charm._ensure_password()
+            if not password:
+                logger.info("Admin password not yet available, skipping frontend initialization")
+                return False
+            utils.push_contents_to_file(container, f"datahub:{password}", "/datahub-frontend/conf/user.props", 0o644)
+            context.charm._state.frontend_user_props_initialized = True
 
-        logger.info("Successful truststore initialization for datahub-frontend")
-        context.charm._state.frontend_truststore_initialized = True
+        # Step 2: Truststore initialization for Opensearch SSL.
+        if not truststore_done:
+            certificates = context.charm._state.opensearch_connection["tls-ca"]
+            try:
+                _import_certificates_to_truststore(
+                    container,
+                    certificates,
+                    literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
+                )
+            except Exception as e:
+                logger.info("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
+                raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
+            logger.info("Successful truststore initialization for datahub-frontend")
+            context.charm._state.frontend_truststore_initialized = True
+
         return True
 
 
@@ -671,7 +700,37 @@ class GMSService(AbstractService):
             env["INDEX_PREFIX"] = context.charm.config.opensearch_index_prefix
         kafka_env = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
         env.update(kafka_env)
+
+        env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
+        env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
+
         return env
+
+    @classmethod
+    def _set_workload_version(cls, context: ServiceContext) -> None:
+        """Extract and set the workload version from the GMS container's rockcraft.yaml.
+
+        Guarded by a state flag so it runs at most once per container lifecycle.
+        On failure, the flag stays unset so the operation retries on the next _update call.
+
+        Args:
+            context: Context for the service.
+        """
+        if context.charm._state.gms_workload_version_set is True:
+            return
+
+        container = context.charm.unit.get_container(cls.name)
+        try:
+            meta_file = container.pull("/rockcraft.yaml")
+            meta = yaml.safe_load(meta_file)
+            if not meta or "version" not in meta:
+                raise ValueError("Cannot find 'version' in 'rockcraft.yaml'.")
+            context.charm.unit.set_workload_version(meta["version"])
+        except Exception as e:
+            logger.warning("Could not set workload version: %s", str(e))
+            return
+
+        context.charm._state.gms_workload_version_set = True
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
@@ -679,6 +738,7 @@ class GMSService(AbstractService):
 
         The GMS rock bundles all setup scripts (PostgreSQL, Opensearch, upgrade)
         in addition to the GMS service itself. Initialization runs in order:
+        0. Workload version extraction (safe, no relation dependencies)
         1. PostgreSQL setup (init.sh)
         2. Opensearch index creation (create-indices.sh)
         3. Truststore initialization for Opensearch SSL
@@ -690,6 +750,9 @@ class GMSService(AbstractService):
         Returns:
             If initialization scripts were run and were successful.
         """
+        # Workload version is a safe read-only operation that doesn't require relations.
+        cls._set_workload_version(context)
+
         if not cls.is_ready(context):
             logger.info("datahub-gms is not ready to be initialized, skipping initialization")
             return False

@@ -3,7 +3,8 @@
 
 """Unit tests for state validation in charm.py."""
 
-from unittest.mock import patch
+import json
+from unittest.mock import MagicMock, patch
 
 import ops
 import pytest
@@ -46,6 +47,9 @@ class TestGetPasswordAction:
                 charm_ctx.run(charm_ctx.on.action("get-password"), base_state)
 
         assert "cannot read password secret" in exc_info.value.message
+
+
+_SECRET_ID = "test-encryption-secret-id"  # nosec B105
 
 
 class TestCheckStateSecretAccess:
@@ -140,3 +144,106 @@ class TestSecretChanged:
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)
         assert "encryption-keys-secret-id" in state_out.unit_status.message
+
+
+class TestSystemClientSecret:
+    """Tests for system client secret persistence lifecycle."""
+
+    def test_returns_empty_without_peer_relation(self, charm_ctx):
+        """Returns empty string when peer relation is not yet available."""
+        state = testing.State(
+            config={"encryption-keys-secret-id": _SECRET_ID},
+            leader=True,
+        )
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            assert mgr.charm.system_client_secret == ""  # nosec B105
+
+    def test_leader_creates_secret_on_first_access(self, charm_ctx):
+        """Leader creates an app-owned secret and returns its value on first access."""
+        peer = testing.PeerRelation(endpoint="peer")
+        state = testing.State(
+            config={"encryption-keys-secret-id": _SECRET_ID},
+            relations=[peer],
+            leader=True,
+        )
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            secret = mgr.charm.system_client_secret
+            assert secret != ""  # nosec B105
+            assert mgr.charm.system_client_secret == secret
+
+    def test_non_leader_returns_empty_before_leader_creates(self, charm_ctx):
+        """Non-leader returns empty string when secret has not yet been created."""
+        peer = testing.PeerRelation(endpoint="peer")
+        state = testing.State(
+            config={"encryption-keys-secret-id": _SECRET_ID},
+            relations=[peer],
+            leader=False,
+        )
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            assert mgr.charm.system_client_secret == ""  # nosec B105
+
+
+class TestCheckStateTrinoPatterns:
+    """Tests for trino-patterns config validation in _check_state."""
+
+    @staticmethod
+    def _encryption_secret_mock():
+        """Return a mock Juju secret with valid encryption key contents."""
+        mock_secret = MagicMock()
+        mock_secret.get_content.return_value = {"gms-key": "k1", "frontend-key": "k2"}
+        return mock_secret
+
+    @staticmethod
+    def _state_with_patterns(base_state, trino_patterns):
+        """Build a test State that passes all checks before trino-patterns validation."""
+        peer = testing.PeerRelation(
+            endpoint="peer",
+            local_app_data={
+                "database_connection": json.dumps({"host": "db"}),
+                "kafka_connection": json.dumps({"host": "kafka"}),
+                "opensearch_connection": json.dumps({"host": "os"}),
+            },
+        )
+        return testing.State(
+            config={**base_state.config, "trino-patterns": trino_patterns},
+            relations=[peer],
+        )
+
+    def test_check_state_raises_on_invalid_json(self, charm_ctx, base_state):
+        """_check_state raises UnreadyStateError when trino-patterns is not valid JSON."""
+        state = self._state_with_patterns(base_state, "not-json")
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                with pytest.raises(exceptions.UnreadyStateError) as exc_info:
+                    mgr.charm._check_state()
+
+        assert "trino-patterns" in str(exc_info.value)
+
+    def test_check_state_raises_on_non_dict_json(self, charm_ctx, base_state):
+        """_check_state raises UnreadyStateError when trino-patterns is a JSON array."""
+        state = self._state_with_patterns(base_state, "[1, 2, 3]")
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                with pytest.raises(exceptions.UnreadyStateError) as exc_info:
+                    mgr.charm._check_state()
+
+        assert "trino-patterns" in str(exc_info.value)
+        assert "JSON object" in str(exc_info.value)
+
+    def test_check_state_passes_with_valid_patterns(self, charm_ctx, base_state):
+        """_check_state does not raise when trino-patterns is a valid JSON object."""
+        valid = json.dumps({"schema-pattern": {"allow": [".*"], "deny": []}})
+        state = self._state_with_patterns(base_state, valid)
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                mgr.charm._check_state()
+
+    def test_update_status_blocks_on_invalid_patterns(self, charm_ctx, base_state):
+        """_on_update_status sets BlockedStatus when trino-patterns is not valid JSON."""
+        state = self._state_with_patterns(base_state, "{{bad}}")
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                state_out = mgr.run()
+
+        assert isinstance(state_out.unit_status, testing.BlockedStatus)
+        assert "trino-patterns" in state_out.unit_status.message
