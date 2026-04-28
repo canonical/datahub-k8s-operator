@@ -231,6 +231,16 @@ The schedule, description, executor, and any non-managed extra arguments can be 
 
 When a catalog is removed from the Trino relation, its corresponding ingestion source is automatically deleted. When the relation is fully broken, all Juju-managed ingestion sources are cleaned up. Note that cleaning the ingestions does not remove already ingested metadata.
 
+#### Managed Resource Naming Conventions
+
+The charm creates the following resources in DataHub, identifiable by their naming patterns:
+
+- **Ingestion sources**: Named `[juju] <catalog-name>-ingestion` (e.g. `[juju] sales-ingestion`).
+- **Per-catalog password secrets**: Named `JUJU_MANAGED_TRINO_PASSWORD_<NORMALIZED_CATALOG>`, where the catalog name is uppercased and non-alphanumeric characters are replaced with `_` (e.g. catalog `my-catalog.test` becomes `JUJU_MANAGED_TRINO_PASSWORD_MY_CATALOG_TEST`).
+- **GMS access token secret**: Named `JUJU_MANAGED_GMS_TOKEN`.
+
+When a catalog is removed or the Trino relation is broken, the corresponding ingestion sources and secrets are automatically deleted. User-created secrets and ingestion sources are not affected if they do not match the charm conventions.
+
 ### Troubleshooting
 
 - **Opensearch offer blocked**: If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not work. This is best identified by requests to `/graphql` returning a `500` error. Ensure the offer is accepted on the provider side.

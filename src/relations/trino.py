@@ -168,7 +168,7 @@ def _is_https(trino_url: str) -> bool:
 
     The catalog interface does not pass the scheme so we determine it
     based on the current conventions.
-    
+
     Args:
         trino_url: Trino URL in host:port format.
 
@@ -512,7 +512,7 @@ class TrinoRelation(framework.Object):
         result = self._prepare_ingestion_state(catalogs, password)
         if result is None:
             return
-        access_token, managed = result
+        access_token, managed, secrets_map = result
 
         existing_by_catalog: Dict[str, Dict[str, Any]] = {}
         for source in managed:
@@ -529,7 +529,7 @@ class TrinoRelation(framework.Object):
 
         self._create_missing_ingestions(desired_catalogs, existing_by_catalog, access_token, params)
         self._update_existing_ingestions(desired_catalogs, existing_by_catalog, access_token, params)
-        self._delete_obsolete_ingestions(desired_catalogs, existing_by_catalog, access_token)
+        self._delete_obsolete_ingestions(desired_catalogs, existing_by_catalog, access_token, secrets_map)
 
     def _prepare_ingestion_state(self, catalogs, password: str) -> Optional[tuple]:
         """Ensure secrets exist and fetch managed ingestion sources, retrying on auth failure.
@@ -539,7 +539,7 @@ class TrinoRelation(framework.Object):
             password: Current Trino password for per-catalog secrets.
 
         Returns:
-            Tuple of (access_token, managed_sources) or None on failure.
+            Tuple of (access_token, managed_sources, secrets_map) or None on failure.
         """
         for attempt in range(2):
             try:
@@ -550,7 +550,7 @@ class TrinoRelation(framework.Object):
                     graphql.ensure_secret(access_token, _normalize_secret_name(catalog.name), password, secrets_map)
                 all_sources = graphql.list_ingestion_sources(access_token)
                 managed = _filter_juju_managed(all_sources)
-                return access_token, managed
+                return access_token, managed, secrets_map
             except graphql.AuthenticationError:
                 if attempt == 0:
                     logger.info("Authentication failed, refreshing token and retrying")
@@ -610,8 +610,9 @@ class TrinoRelation(framework.Object):
         desired: Set[str],
         existing: Dict[str, Dict[str, Any]],
         bearer: str,
+        secrets_map: Dict[str, str],
     ) -> None:
-        """Delete ingestion sources for catalogs no longer in the relation."""
+        """Delete ingestion sources and their secrets for catalogs no longer in the relation."""
         for catalog_name in set(existing.keys()) - desired:
             source = existing[catalog_name]
             try:
@@ -619,13 +620,22 @@ class TrinoRelation(framework.Object):
                 logger.info("Deleted obsolete ingestion source for catalog '%s'", catalog_name)
             except Exception as e:
                 logger.error("Failed to delete ingestion for catalog '%s': %s", catalog_name, str(e))
+            secret_name = _normalize_secret_name(catalog_name)
+            secret_urn = secrets_map.get(secret_name)
+            if secret_urn:
+                try:
+                    graphql.delete_secret(bearer, secret_urn)
+                    logger.info("Deleted secret '%s' for catalog '%s'", secret_name, catalog_name)
+                except Exception as e:
+                    logger.error("Failed to delete secret for catalog '%s': %s", catalog_name, str(e))
 
     def _cleanup_managed_ingestions(self) -> None:
-        """Delete all Juju-managed Trino ingestion sources (relation-broken cleanup)."""
+        """Delete all Juju-managed Trino ingestion sources and secrets (relation-broken cleanup)."""  # noqa W505
         try:
             access_token = self.access_token
             all_sources = graphql.list_ingestion_sources(access_token)
             managed = _filter_juju_managed(all_sources)
+            secrets_map = graphql.list_secrets(access_token)
         except Exception as e:
             logger.error("Failed to fetch ingestion sources during cleanup: %s", str(e))
             return
@@ -636,3 +646,11 @@ class TrinoRelation(framework.Object):
                 logger.info("Cleaned up ingestion source '%s'", source["name"])
             except Exception as e:
                 logger.error("Failed to clean up ingestion '%s': %s", source["name"], str(e))
+
+        for secret_name, secret_urn in secrets_map.items():
+            if secret_name == GMS_TOKEN_SECRET_NAME or secret_name.startswith(TRINO_PASSWORD_SECRET_PREFIX):
+                try:
+                    graphql.delete_secret(access_token, secret_urn)
+                    logger.info("Cleaned up secret '%s'", secret_name)
+                except Exception as e:
+                    logger.error("Failed to clean up secret '%s': %s", secret_name, str(e))

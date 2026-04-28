@@ -276,3 +276,17 @@ def delete_ingestion_source(bearer_token: str, urn: str) -> None:
             deleteIngestionSource(urn: $urn)
         }""")
     _graphql_request(query, {"urn": urn}, bearer_token)
+
+
+def delete_secret(bearer_token: str, urn: str) -> None:
+    """Delete a secret from DataHub.
+
+    Args:
+        bearer_token: Bearer token for authentication.
+        urn: URN of the secret to delete.
+    """
+    query = textwrap.dedent("""\
+        mutation deleteSecret($urn: String!) {
+            deleteSecret(urn: $urn)
+        }""")
+    _graphql_request(query, {"urn": urn}, bearer_token)
