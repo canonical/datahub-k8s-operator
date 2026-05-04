@@ -294,6 +294,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         is_down = False
         is_invalid = False
         is_not_ready = False
+        down_services: List[str] = []
         for service in SERVICES:
             if service.healthcheck is None:
                 continue
@@ -326,6 +327,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s'", service.name)
                 is_down = True
+                down_services.append(service.name)
                 continue
             logger.debug("service '%s' is up", service.name)
 
@@ -336,8 +338,12 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
-            logger.info("services down, exiting to wait for the next update")
+            logger.info("services down, attempting restart: %s", down_services)
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
+            for name in down_services:
+                container = self.unit.get_container(name)
+                if container.can_connect():
+                    container.restart(name)
         else:
             self._reconcile_trino_if_ready()
             self.unit.status = ops.ActiveStatus()

@@ -9,8 +9,10 @@ from unittest.mock import MagicMock, patch
 import ops
 import pytest
 from ops import testing
+from ops.pebble import CheckStatus
 
 import exceptions
+import services as svc
 from charm import DatahubK8SOperatorCharm
 
 
@@ -247,3 +249,31 @@ class TestCheckStateTrinoPatterns:
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)
         assert "trino-patterns" in state_out.unit_status.message
+
+
+class TestUpdateStatusRestart:
+    """Tests for charm-driven container restart on health-check failure."""
+
+    def test_restarts_gms_when_up_check_is_down(self, charm_ctx, base_state):
+        """_on_update_status restarts GMS when its up check reports DOWN."""
+        mock_check = MagicMock()
+        mock_check.status = CheckStatus.DOWN
+
+        mock_container = MagicMock()
+        mock_container.can_connect.return_value = True
+        mock_container.get_check.return_value = mock_check
+        # Plan comparison must match to avoid the is_invalid branch.
+        mock_container.get_plan.return_value.to_dict.return_value = {}
+
+        with charm_ctx(charm_ctx.on.update_status(), base_state) as mgr:
+            with patch.object(mgr.charm, "_check_state"):
+                with patch("charm.get_pebble_layer", return_value={}):
+                    with patch.object(svc.GMSService, "is_enabled", return_value=True):
+                        # Exclude FrontendService from the loop so is_not_ready stays False.
+                        with patch.object(svc.FrontendService, "healthcheck", new=None):
+                            with patch.object(mgr.charm.unit, "get_container", return_value=mock_container):
+                                state_out = mgr.run()
+
+        mock_container.restart.assert_called_once_with(svc.GMSService.name)
+        assert isinstance(state_out.unit_status, testing.MaintenanceStatus)
+        assert "DOWN" in state_out.unit_status.message

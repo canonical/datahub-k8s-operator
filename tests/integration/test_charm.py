@@ -161,6 +161,20 @@ def test_deploy_full(full_stack: jubilant.Juju):
     response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
     assert response.status_code == 200
 
+    logger.info("Verifying GMS workload version is embedded")
+    gms_url = helpers.get_unit_url(full_stack, helpers.APP_NAME, 0, 8080)
+    config_response = requests.get(f"{gms_url}/config", timeout=10)
+    assert config_response.status_code == 200
+    versions = config_response.json().get("versions", {})
+    datahub_info = versions.get("acryldata/datahub", {})
+    datahub_version = datahub_info.get("version")
+    datahub_commit = datahub_info.get("commit")
+
+    logger.info("DATAHUB_GMS_VERSION version=%s commit=%s", datahub_version, datahub_commit)
+    assert (
+        datahub_version and datahub_version != "null"
+    ), f"DataHub /config returned invalid version: {datahub_version!r}"
+
 
 def test_reindex_action(full_stack: jubilant.Juju):
     """Run and verify the reindex action."""
