@@ -192,13 +192,17 @@ def test_deploy_full(full_stack: jubilant.Juju):
 
     body = search_response.json()
     errors = body.get("errors") or []
+    search_total = body.get("data", {}).get("searchAcrossEntities", {}).get("total")
     ssl_errors = [e for e in errors if any(token in str(e) for token in ("PKIX", "SSL", "version='unknown'"))]
     logger.info(
-        "DATAHUB_GMS_SEARCH errors=%d ssl_errors=%d",
+        "DATAHUB_GMS_SEARCH errors=%d ssl_errors=%d total_present=%s",
         len(errors),
         len(ssl_errors),
+        search_total is not None,
     )
     assert not ssl_errors, f"SSL/trust errors during search: {ssl_errors}"
+    assert not errors, f"GraphQL search returned errors: {errors}"
+    assert search_total is not None, f"GraphQL search did not return data.searchAcrossEntities.total: {body}"
 
 
 def test_reindex_action(full_stack: jubilant.Juju):
