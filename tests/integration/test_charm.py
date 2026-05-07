@@ -175,6 +175,31 @@ def test_deploy_full(full_stack: jubilant.Juju):
         datahub_version and datahub_version != "null"
     ), f"DataHub /config returned invalid version: {datahub_version!r}"
 
+    # Exercise the OpenSearch-backed search path. If the JVM truststore is
+    # missing the OpenSearch CA, this surfaces as PKIX errors in the GraphQL
+    # response.
+    logger.info("Verifying GMS can serve search queries (OpenSearch TLS path)")
+    session = requests.Session()
+    login_response = session.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
+    assert login_response.status_code == 200
+
+    graphql_url = f"{base_url}/api/v2/graphql"
+    query = {"query": ('{ searchAcrossEntities(input: {types: [DATASET], query: "*", count: 1})' " { total } }")}
+    search_response = session.post(graphql_url, json=query, timeout=15)
+    assert (
+        search_response.status_code == 200
+    ), f"GraphQL request returned {search_response.status_code}: {search_response.text[:500]}"
+
+    body = search_response.json()
+    errors = body.get("errors") or []
+    ssl_errors = [e for e in errors if any(token in str(e) for token in ("PKIX", "SSL", "version='unknown'"))]
+    logger.info(
+        "DATAHUB_GMS_SEARCH errors=%d ssl_errors=%d",
+        len(errors),
+        len(ssl_errors),
+    )
+    assert not ssl_errors, f"SSL/trust errors during search: {ssl_errors}"
+
 
 def test_reindex_action(full_stack: jubilant.Juju):
     """Run and verify the reindex action."""

@@ -359,10 +359,7 @@ class FrontendService(AbstractService):
             Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
-        checks = (
-            context.charm._state.frontend_user_props_initialized is True,
-            context.charm._state.frontend_truststore_initialized is True,
-        )
+        checks = (context.charm._state.frontend_user_props_initialized is True,)
         return is_ready and all(checks)
 
     @classmethod
@@ -524,10 +521,6 @@ class FrontendService(AbstractService):
             return False
 
         user_props_done = context.charm._state.frontend_user_props_initialized is True
-        truststore_done = context.charm._state.frontend_truststore_initialized is True
-        if user_props_done and truststore_done:
-            logger.debug("datahub-frontend is already initialized, skipping initialization")
-            return False
 
         container = context.charm.unit.get_container(cls.name)
 
@@ -541,19 +534,20 @@ class FrontendService(AbstractService):
             context.charm._state.frontend_user_props_initialized = True
 
         # Step 2: Truststore initialization for Opensearch SSL.
-        if not truststore_done:
-            certificates = context.charm._state.opensearch_connection["tls-ca"]
-            try:
-                _import_certificates_to_truststore(
-                    container,
-                    certificates,
-                    literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
-                )
-            except Exception as e:
-                logger.info("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
-                raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
-            logger.info("Successful truststore initialization for datahub-frontend")
-            context.charm._state.frontend_truststore_initialized = True
+        # Runs unconditionally on every _update. _import_certificates_to_truststore
+        # has per-alias dedup so re-runs are cheap; running every time is what
+        # makes the truststore self-heal after missing cacerts.
+        certificates = context.charm._state.opensearch_connection["tls-ca"]
+        try:
+            _import_certificates_to_truststore(
+                container,
+                certificates,
+                literals.OPENSEARCH_ROOT_CA_CERT_ALIAS,
+            )
+        except Exception as e:
+            logger.info("Failed to initialize truststore for datahub-frontend: '%s'", str(e))
+            raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
+        logger.debug("Truststore for datahub-frontend is up to date")
 
         return True
 
@@ -585,10 +579,7 @@ class GMSService(AbstractService):
             Whether the service should be enabled.
         """
         is_ready = cls.is_ready(context)
-        checks = (
-            context.charm._state.ran_upgrade,
-            context.charm._state.gms_truststore_initialized is True,
-        )
+        checks = (context.charm._state.ran_upgrade,)
         return is_ready and all(checks)
 
     @classmethod
@@ -884,11 +875,6 @@ class GMSService(AbstractService):
         Raises:
             InitializationFailedError: If the initialization fails.
         """
-        check_gms_truststore = context.charm._state.gms_truststore_initialized is True
-        if check_gms_truststore:
-            logger.debug("datahub-gms truststore is already initialized, skipping")
-            return
-
         certificates = context.charm._state.opensearch_connection["tls-ca"]
 
         try:
@@ -901,8 +887,7 @@ class GMSService(AbstractService):
             logger.info("Failed truststore initialization for datahub-gms: '%s'", str(e))
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-gms")
 
-        logger.info("Successful truststore initialization for datahub-gms")
-        context.charm._state.gms_truststore_initialized = True
+        logger.debug("Truststore for datahub-gms is up to date")
 
     @classmethod
     def _run_upgrade(cls, context: ServiceContext, container) -> None:

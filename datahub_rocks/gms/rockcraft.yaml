@@ -19,7 +19,7 @@ services:
     override: merge
     command: "/datahub/datahub-gms/scripts/start.sh"
     on-check-failure:
-      up: ignore
+      up: restart
     environment:
       JMX_VERSION: "0.20.0"
       LD_LIBRARY_PATH: "/lib:/lib64"

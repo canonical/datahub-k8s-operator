@@ -69,11 +69,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
         svc_dict["environment"] = env
 
     if service.healthcheck is not None:
-        svc_dict.update(
-            {
-                "on-check-failure": {"up": "ignore"},
-            }
-        )
+        svc_dict.update({"on-check-failure": {"up": "restart"}})
         layer.update(
             {
                 "checks": {
@@ -182,10 +178,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         if event.workload.name == services.FrontendService.name:
             self._state.frontend_user_props_initialized = False
-            self._state.frontend_truststore_initialized = False
         if event.workload.name == services.GMSService.name:
             self._state.gms_workload_version_set = False
-            self._state.gms_truststore_initialized = False
 
         self._update(event)
 
@@ -294,7 +288,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         is_down = False
         is_invalid = False
         is_not_ready = False
-        down_services: List[str] = []
         for service in SERVICES:
             if service.healthcheck is None:
                 continue
@@ -327,7 +320,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s'", service.name)
                 is_down = True
-                down_services.append(service.name)
                 continue
             logger.debug("service '%s' is up", service.name)
 
@@ -338,12 +330,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
-            logger.info("services down, attempting restart: %s", down_services)
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
-            for name in down_services:
-                container = self.unit.get_container(name)
-                if container.can_connect():
-                    container.restart(name)
         else:
             self._reconcile_trino_if_ready()
             self.unit.status = ops.ActiveStatus()

@@ -132,7 +132,6 @@ def test_gms_compile_environment_includes_system_client():
             "initialized": True,
         },
         ran_upgrade=True,
-        gms_truststore_initialized=True,
     )
     encryption_secret = SimpleNamespace(
         get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
@@ -205,7 +204,6 @@ def test_frontend_compile_environment_includes_system_client():
             "initialized": True,
         },
         ran_upgrade=True,
-        frontend_truststore_initialized=True,
     )
     encryption_secret = SimpleNamespace(
         get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
@@ -241,7 +239,7 @@ class TestFrontendRunInitialization:
     """Tests for FrontendService.run_initialization user.props and truststore steps."""
 
     @staticmethod
-    def _make_context(*, user_props_done=False, truststore_done=False, password="s3cret"):
+    def _make_context(*, user_props_done=False, password="s3cret"):
         """Build a ServiceContext wired for FrontendService initialization tests."""
         state = SimpleNamespace(
             kafka_connection={
@@ -260,7 +258,6 @@ class TestFrontendRunInitialization:
             },  # nosec B105
             ran_upgrade=True,
             frontend_user_props_initialized=user_props_done,
-            frontend_truststore_initialized=truststore_done,
         )
         container = SimpleNamespace(push=lambda *a, **kw: None)
         unit = SimpleNamespace(get_container=lambda name: container)
@@ -273,29 +270,36 @@ class TestFrontendRunInitialization:
 
     def test_pushes_user_props_when_not_done(self):
         """user.props is pushed and flag is set when not yet initialized."""
-        context = self._make_context(user_props_done=False, truststore_done=True)
+        context = self._make_context(user_props_done=False)
 
         with patch.object(services.FrontendService, "is_ready", return_value=True):
-            result = services.FrontendService.run_initialization(context)
+            with patch.object(services, "_import_certificates_to_truststore"):
+                result = services.FrontendService.run_initialization(context)
 
         assert result is True
         assert context.charm._state.frontend_user_props_initialized is True
 
-    def test_skips_when_already_initialized(self):
-        """Initialization is skipped when both steps are already done."""
-        context = self._make_context(user_props_done=True, truststore_done=True)
+    def test_truststore_runs_unconditionally(self):
+        """Truststore import runs even when user.props is already initialized.
+
+        Truststore self-heals after missing cacerts. _import_certificates_to_truststore
+        does its own per-alias dedup, so re-runs are cheap.
+        """
+        context = self._make_context(user_props_done=True)
 
         with patch.object(services.FrontendService, "is_ready", return_value=True):
-            result = services.FrontendService.run_initialization(context)
+            with patch.object(services, "_import_certificates_to_truststore") as mock_import:
+                services.FrontendService.run_initialization(context)
 
-        assert result is False
+        mock_import.assert_called_once()
 
     def test_returns_false_when_password_unavailable(self):
         """Returns False without setting flag when password is empty."""
-        context = self._make_context(user_props_done=False, truststore_done=True, password="")  # nosec B106
+        context = self._make_context(user_props_done=False, password="")  # nosec B106
 
         with patch.object(services.FrontendService, "is_ready", return_value=True):
-            result = services.FrontendService.run_initialization(context)
+            with patch.object(services, "_import_certificates_to_truststore"):
+                result = services.FrontendService.run_initialization(context)
 
         assert result is False
         assert context.charm._state.frontend_user_props_initialized is False
