@@ -330,6 +330,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
+            logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
             self._reconcile_trino_if_ready()
