@@ -549,6 +549,22 @@ class FrontendService(AbstractService):
             raise exceptions.InitializationFailedError("failed to initialize truststores for datahub-frontend")
         logger.debug("Truststore for datahub-frontend is up to date")
 
+        # Step 3: Patch application.conf to serve static assets with immutable cache headers.
+        # Play defaults to max-age=3600, which forces browsers to re-download and cold-parse
+        # the 18MB JS bundle every hour. Assets use content-addressed filenames (hash in name),
+        # so they are safe to cache indefinitely since the hash changes on each upgrade.
+        app_conf_path = "/datahub-frontend/conf/application.conf"
+        cache_directive = 'play.assets.cache."/public" = "public, max-age=31536000, immutable"'
+        try:
+            app_conf = container.pull(app_conf_path).read()
+            if cache_directive not in app_conf:
+                utils.push_contents_to_file(container, app_conf + f"\n{cache_directive}\n", app_conf_path, 0o644)
+                logger.debug("Patched application.conf with immutable asset cache headers")
+            else:
+                logger.debug("application.conf already contains immutable asset cache directive, skipping")
+        except Exception as e:
+            logger.warning("Failed to patch application.conf for asset cache headers: '%s'", str(e))
+
         return True
 
 
