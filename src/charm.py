@@ -69,11 +69,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
         svc_dict["environment"] = env
 
     if service.healthcheck is not None:
-        svc_dict.update(
-            {
-                "on-check-failure": {"up": "ignore"},
-            }
-        )
+        svc_dict.update({"on-check-failure": {"up": "restart"}})
         layer.update(
             {
                 "checks": {
@@ -182,10 +178,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         if event.workload.name == services.FrontendService.name:
             self._state.frontend_user_props_initialized = False
-            self._state.frontend_truststore_initialized = False
         if event.workload.name == services.GMSService.name:
             self._state.gms_workload_version_set = False
-            self._state.gms_truststore_initialized = False
 
         self._update(event)
 

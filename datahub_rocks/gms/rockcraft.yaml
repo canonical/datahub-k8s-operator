@@ -19,7 +19,7 @@ services:
     override: merge
     command: "/datahub/datahub-gms/scripts/start.sh"
     on-check-failure:
-      up: ignore
+      up: restart
     environment:
       JMX_VERSION: "0.20.0"
       LD_LIBRARY_PATH: "/lib:/lib64"
@@ -77,6 +77,13 @@ parts:
 
       # Ensure python points to python3.11
       ln -sf /usr/bin/python3.11 /usr/bin/python
+
+      # source-depth: 1 strips all tags from the shallow clone, causing
+      # Gradle's git-properties plugin to set git.commit.id.describe=null,
+      # which DataHub surfaces as "version": "null" in the /config endpoint.
+      # Recreate the release tag locally before the build so the plugin
+      # resolves it correctly.
+      git tag "v${CRAFT_PROJECT_VERSION}"
 
       # ── Gradle build ────────────────────────────────────────────────
       ./gradlew :metadata-service:war:build :datahub-upgrade:build \

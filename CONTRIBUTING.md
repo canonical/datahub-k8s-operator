@@ -124,7 +124,7 @@ When updating the rocks to a newer version of DataHub (e.g. going from `v1.4.0.5
    ```
 2. In each `rockcraft.yaml`, update the `source-commit` field to the new hash.
 3. Update the comment next to `source-commit` to reflect the new tag (e.g. `# v1.4.1`).
-4. Update other references to the version (such as `version` and `summary`) as necessary.
+4. Update the `version` and `summary` fields at the top of each `rockcraft.yaml` to the new version. This is especially important for the GMS rock: its `override-build` runs `git tag v${CRAFT_PROJECT_VERSION}` before Gradle so that Gradle's `git-properties` plugin can resolve the version. Without this tag the `/config` endpoint returns `"version": "null"`. The `${CRAFT_PROJECT_VERSION}` variable is injected by `rockcraft` from the top-level `version:` field.
 
 ## Code quality
 

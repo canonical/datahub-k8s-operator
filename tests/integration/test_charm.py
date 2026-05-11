@@ -161,6 +161,49 @@ def test_deploy_full(full_stack: jubilant.Juju):
     response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
     assert response.status_code == 200
 
+    logger.info("Verifying GMS workload version is embedded")
+    gms_url = helpers.get_unit_url(full_stack, helpers.APP_NAME, 0, 8080)
+    config_response = requests.get(f"{gms_url}/config", timeout=10)
+    assert config_response.status_code == 200
+    versions = config_response.json().get("versions", {})
+    datahub_info = versions.get("acryldata/datahub", {})
+    datahub_version = datahub_info.get("version")
+    datahub_commit = datahub_info.get("commit")
+
+    logger.info("DATAHUB_GMS_VERSION version=%s commit=%s", datahub_version, datahub_commit)
+    assert (
+        datahub_version and datahub_version != "null"
+    ), f"DataHub /config returned invalid version: {datahub_version!r}"
+
+    # Exercise the OpenSearch-backed search path. If the JVM truststore is
+    # missing the OpenSearch CA, this surfaces as PKIX errors in the GraphQL
+    # response.
+    logger.info("Verifying GMS can serve search queries (OpenSearch TLS path)")
+    session = requests.Session()
+    login_response = session.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
+    assert login_response.status_code == 200
+
+    graphql_url = f"{base_url}/api/v2/graphql"
+    query = {"query": ('{ searchAcrossEntities(input: {types: [DATASET], query: "*", count: 1})' " { total } }")}
+    search_response = session.post(graphql_url, json=query, timeout=15)
+    assert (
+        search_response.status_code == 200
+    ), f"GraphQL request returned {search_response.status_code}: {search_response.text[:500]}"
+
+    body = search_response.json()
+    errors = body.get("errors") or []
+    search_total = body.get("data", {}).get("searchAcrossEntities", {}).get("total")
+    ssl_errors = [e for e in errors if any(token in str(e) for token in ("PKIX", "SSL", "version='unknown'"))]
+    logger.info(
+        "DATAHUB_GMS_SEARCH errors=%d ssl_errors=%d total_present=%s",
+        len(errors),
+        len(ssl_errors),
+        search_total is not None,
+    )
+    assert not ssl_errors, f"SSL/trust errors during search: {ssl_errors}"
+    assert not errors, f"GraphQL search returned errors: {errors}"
+    assert search_total is not None, f"GraphQL search did not return data.searchAcrossEntities.total: {body}"
+
 
 def test_reindex_action(full_stack: jubilant.Juju):
     """Run and verify the reindex action."""
