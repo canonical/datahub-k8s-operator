@@ -8,6 +8,7 @@ import json
 import logging
 import secrets
 from typing import Dict, List, Type, Union
+from urllib.parse import urlparse
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import (
@@ -16,7 +17,7 @@ from charms.data_platform_libs.v0.data_interfaces import (
     OpenSearchRequires,
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
-from charms.nginx_ingress_integrator.v0.nginx_route import require_nginx_route
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from ops.pebble import CheckStatus
 
 import exceptions
@@ -94,8 +95,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     Attributes:
         _state: Used to store persistent data between invocations.
         config_type: Class used to store the config.
-        external_fe_hostname: Property for the hostname of the frontend visible to outside.
-        external_gms_hostname: Property for the hostname of the GMS visible to outside.
         system_client_id: The DataHub system client identifier for API auth.
         system_client_secret: The DataHub system client secret for API auth.
     """
@@ -147,7 +146,21 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self.trino_relation = TrinoRelation(self)
 
         # Ingress
-        self._require_nginx_route()
+        self.frontend_ingress = IngressPerAppRequirer(
+            self,
+            relation_name="frontend-ingress",
+            port=literals.FRONTEND_PORT,
+            strip_prefix=False,
+        )
+        self.gms_ingress = IngressPerAppRequirer(
+            self,
+            relation_name="gms-ingress",
+            port=literals.GMS_PORT,
+            strip_prefix=False,
+        )
+        for ingress in (self.frontend_ingress, self.gms_ingress):
+            self.framework.observe(ingress.on.ready, self._on_ingress_changed)
+            self.framework.observe(ingress.on.revoked, self._on_ingress_changed)
 
     @property
     def system_client_id(self) -> str:
@@ -158,16 +171,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     def system_client_secret(self) -> str:
         """Return the DataHub system client secret."""
         return self._get_or_create_system_client_secret()
-
-    @property
-    def external_fe_hostname(self):
-        """Return the hostname used for external connections to the frontend."""
-        return self.config["external-fe-hostname"] or f"{self.app.name}-frontend"
-
-    @property
-    def external_gms_hostname(self):
-        """Return the hostname used for external connections to the GMS."""
-        return self.config["external-gms-hostname"] or f"{self.app.name}-gms"
 
     @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
@@ -305,7 +308,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.debug("performing up check for '%s'", service.name)
             try:
                 check = container.get_check("up")
-            except ops.model.ModelError:
+            except ops.ModelError:
                 logger.info("invalid plan (missing check) for '%s'", service.name)
                 is_invalid = True
                 break  # guaranteed replan, exit loop
@@ -349,7 +352,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         except Exception as e:
             logger.error("Trino reconciliation failed: %s", str(e))
 
-    def _check_state(self):
+    def _check_state(self):  # noqa: C901
         """Check the current state of the relations and overall charm readiness.
 
         Raises:
@@ -409,6 +412,24 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         if not isinstance(parsed, dict):
             raise exceptions.UnreadyStateError("invalid 'trino-patterns' config: must be a JSON object")
 
+        if self.config.oidc_secret_id:
+            self._check_oidc_requires_https()
+
+    def _check_oidc_requires_https(self):
+        """Ensure the frontend ingress URL is TLS-terminated when OIDC is enabled.
+
+        Raises:
+            UnreadyStateError: If the ingress is not ready or the URL is plain http.
+        """
+        fe_url = self.frontend_ingress.url if self.frontend_ingress.is_ready() else None
+        if not fe_url:
+            raise exceptions.UnreadyStateError("OIDC is enabled but the 'frontend-ingress' relation is not ready")
+        parsed_url = urlparse(fe_url)
+        if parsed_url.scheme != "https" and parsed_url.hostname != "localhost":
+            raise exceptions.UnreadyStateError(
+                "OIDC requires an HTTPS ingress URL; integrate the ingress with a certificates provider"
+            )
+
     def _get_password(self):
         """Return the existing admin password, or None if it has not been generated yet."""
         relation = self.model.get_relation("peer")
@@ -459,28 +480,14 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         return ""
 
-    def _require_nginx_route(self):
-        """Require nginx-route relation based on the current configuration."""
-        # TODO (mertalpt): Ensure `tls_secret_name` functionality works or remove it entirely.
-        require_nginx_route(
-            charm=self,
-            service_hostname=self.external_fe_hostname,
-            service_name=self.app.name,
-            service_port=literals.FRONTEND_PORT,
-            tls_secret_name=self.config["tls-secret-name"] or "",
-            backend_protocol="HTTP",
-            nginx_route_relation_name="nginx-fe-route",
-        )
+    @log_event_handler(logger)
+    def _on_ingress_changed(self, event):
+        """Re-render pebble plans so the OIDC base URL tracks the ingress URL.
 
-        require_nginx_route(
-            charm=self,
-            service_hostname=self.external_gms_hostname,
-            service_name=self.app.name,
-            service_port=literals.GMS_PORT,
-            tls_secret_name=self.config["tls-secret-name"] or "",
-            backend_protocol="HTTP",
-            nginx_route_relation_name="nginx-gms-route",
-        )
+        Args:
+            event: The ingress ready/revoked event.
+        """
+        self._update(event)
 
     def _update(self, event):
         """Update the DataHub configuration and replan its execution.
