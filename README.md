@@ -174,27 +174,23 @@ juju run datahub-k8s/leader reindex clean=true
 
 ### Configuring Ingress
 
-The DataHub charm supports exposing the frontend and GMS services via [Nginx Ingress Integrator](https://charmhub.io/nginx-ingress-integrator).
+The DataHub charm exposes the frontend and GMS services through the standard `ingress` interface, backed by [Traefik](https://charmhub.io/traefik-k8s).
 
 ```sh
-juju deploy nginx-ingress-integrator --channel latest/edge --trust
-juju relate datahub-k8s:nginx-fe-route nginx-ingress-integrator
+juju deploy traefik-k8s --channel latest/stable --trust
+juju integrate datahub-k8s:frontend-ingress traefik-k8s
+juju integrate datahub-k8s:gms-ingress traefik-k8s
 ```
 
-You can configure the external hostnames with:
+Traefik assigns the external URLs and publishes them back to the charm via the relation. The frontend OIDC `AUTH_OIDC_BASE_URL` is taken from the Traefik-provided URL automatically, so no manual hostname configuration is needed.
+
+To inspect the URLs that Traefik has handed out:
 
 ```sh
-juju config datahub-k8s external-fe-hostname=datahub.example.com
-juju config datahub-k8s external-gms-hostname=datahub-gms.example.com
+juju run traefik-k8s/0 show-proxied-endpoints
 ```
 
-To enable TLS, you can either create a Kubernetes TLS secret manually and pass its name to the charm:
-
-```sh
-juju config datahub-k8s tls-secret-name=<k8s-tls-secret-name>
-```
-
-Alternatively, you can use the [Lego](https://charmhub.io/lego) charm to automate certificate management via ACME providers such as Let's Encrypt.
+TLS termination is configured on the Traefik side, see the [Traefik charm docs](https://charmhub.io/traefik-k8s) for how to wire it to a certificates provider (for example [self-signed-certificates](https://charmhub.io/self-signed-certificates) for local environments or [Lego](https://charmhub.io/lego) for ACME providers such as Let's Encrypt).
 
 ### Integrating to Trino
 
