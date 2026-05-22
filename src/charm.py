@@ -145,18 +145,20 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Trino
         self.trino_relation = TrinoRelation(self)
 
-        # Ingress
+        # Ingress. `strip_prefix=True` so Traefik strips the per-app path
+        # prefix before forwarding, the frontend SPA and GMS REST endpoints
+        # both expect to live at the root of their respective backend.
         self.frontend_ingress = IngressPerAppRequirer(
             self,
             relation_name="frontend-ingress",
             port=literals.FRONTEND_PORT,
-            strip_prefix=False,
+            strip_prefix=True,
         )
         self.gms_ingress = IngressPerAppRequirer(
             self,
             relation_name="gms-ingress",
             port=literals.GMS_PORT,
-            strip_prefix=False,
+            strip_prefix=True,
         )
         for ingress in (self.frontend_ingress, self.gms_ingress):
             self.framework.observe(ingress.on.ready, self._on_ingress_changed)
