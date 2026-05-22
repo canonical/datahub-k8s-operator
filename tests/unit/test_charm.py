@@ -4,6 +4,7 @@
 """Unit tests for state validation in charm.py."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import ops
@@ -248,6 +249,92 @@ class TestCheckStateTrinoPatterns:
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)
         assert "trino-patterns" in state_out.unit_status.message
+
+
+class TestCheckStateOIDC:
+    """Tests for the OIDC-requires-HTTPS guard in _check_state."""
+
+    @staticmethod
+    def _encryption_secret_mock():
+        """Return a mock Juju secret with valid encryption key contents."""
+        mock_secret = MagicMock()
+        mock_secret.get_content.return_value = {"gms-key": "k1", "frontend-key": "k2"}
+        return mock_secret
+
+    @staticmethod
+    def _state_with_oidc(base_state, *, oidc_id="oidc-id"):
+        """Build a test State that satisfies the pre-OIDC checks in _check_state."""
+        peer = testing.PeerRelation(
+            endpoint="peer",
+            local_app_data={
+                "database_connection": json.dumps({"host": "db"}),
+                "kafka_connection": json.dumps({"host": "kafka"}),
+                "opensearch_connection": json.dumps({"host": "os"}),
+            },
+        )
+        return testing.State(
+            config={**base_state.config, "oidc-secret-id": oidc_id},
+            relations=[peer],
+        )
+
+    @staticmethod
+    def _set_ingress(charm, *, ready, url):
+        """Replace frontend_ingress with a stub exposing the given state."""
+        charm.frontend_ingress = SimpleNamespace(is_ready=lambda: ready, url=url)
+
+    def test_raises_when_oidc_enabled_and_ingress_not_ready(self, charm_ctx, base_state):
+        """_check_state blocks when OIDC is on but the ingress hasn't published a URL."""
+        state = self._state_with_oidc(base_state)
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                self._set_ingress(mgr.charm, ready=False, url=None)
+                with pytest.raises(exceptions.UnreadyStateError) as exc_info:
+                    mgr.charm._check_state()
+
+        assert "frontend-ingress" in str(exc_info.value)
+
+    def test_raises_when_oidc_url_is_plain_http(self, charm_ctx, base_state):
+        """_check_state blocks when OIDC is on but the ingress URL is http://non-localhost."""
+        state = self._state_with_oidc(base_state)
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                self._set_ingress(mgr.charm, ready=True, url="http://datahub.example/foo")
+                with pytest.raises(exceptions.UnreadyStateError) as exc_info:
+                    mgr.charm._check_state()
+
+        assert "HTTPS" in str(exc_info.value)
+
+    def test_passes_when_oidc_url_is_https(self, charm_ctx, base_state):
+        """_check_state allows an HTTPS ingress URL with OIDC enabled."""
+        state = self._state_with_oidc(base_state)
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                self._set_ingress(mgr.charm, ready=True, url="https://datahub.example/")
+                mgr.charm._check_state()
+
+    def test_passes_when_oidc_url_is_localhost(self, charm_ctx, base_state):
+        """_check_state allows http://localhost for OIDC (OAuth 2.0 dev exemption)."""
+        state = self._state_with_oidc(base_state)
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                self._set_ingress(mgr.charm, ready=True, url="http://localhost:9002")
+                mgr.charm._check_state()
+
+    def test_skipped_when_oidc_disabled(self, charm_ctx, base_state):
+        """_check_state does not require ingress when OIDC is not configured."""
+        peer = testing.PeerRelation(
+            endpoint="peer",
+            local_app_data={
+                "database_connection": json.dumps({"host": "db"}),
+                "kafka_connection": json.dumps({"host": "kafka"}),
+                "opensearch_connection": json.dumps({"host": "os"}),
+            },
+        )
+        state = testing.State(config=base_state.config, relations=[peer])
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                self._set_ingress(mgr.charm, ready=False, url=None)
+                mgr.charm._check_state()
 
 
 class TestGetPebbleLayer:

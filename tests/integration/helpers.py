@@ -3,9 +3,10 @@
 
 """Helpers for integration tests."""
 
+import json
 import logging
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, Mapping, Sequence, Tuple
 
 import jubilant
 import yaml
@@ -33,8 +34,10 @@ CERTIFICATES_REVISION = 264
 ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
 ZOOKEEPER_REVISION = 149
-INGRESS_NAME = "nginx-ingress-integrator"
-INGRESS_CHANNEL = "stable"
+INGRESS_NAME = "traefik-k8s"
+INGRESS_CHANNEL = "latest/stable"
+K8S_CERTIFICATES_NAME = "self-signed-certificates"
+K8S_CERTIFICATES_CHANNEL = "latest/stable"
 
 
 def _app_status_current(status: jubilant.Status, app_name: str) -> str:
@@ -147,7 +150,8 @@ def deploy_charm(juju: jubilant.Juju, charm: Path, resources: dict) -> None:
         timeout=5 * 60,
         raise_on_error=False,
     )
-    juju.integrate(f"{APP_NAME}:nginx-fe-route", INGRESS_NAME)
+    juju.integrate(f"{APP_NAME}:frontend-ingress", INGRESS_NAME)
+    juju.integrate(f"{APP_NAME}:gms-ingress", INGRESS_NAME)
     wait_for_apps_status(
         juju,
         {
@@ -187,6 +191,54 @@ def get_unit_url(juju: jubilant.Juju, application: str, unit: int, port: int, pr
         raise ValueError(f"No reachable address found for unit '{unit_name}'")
 
     return f"{protocol}://{address}:{port}"
+
+
+def get_proxied_endpoints(juju: jubilant.Juju) -> Dict[str, Any]:
+    """Return the proxied endpoints exposed by ``traefik-k8s/0``.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where Traefik is deployed.
+
+    Returns:
+        The parsed ``proxied-endpoints`` mapping returned by Traefik's
+        ``show-proxied-endpoints`` action. Keys are ingress requirer
+        identifiers (typically the requirer app name, possibly suffixed
+        per-relation); each value is a dict with at least a ``url`` field.
+    """
+    action_output = juju.run(f"{INGRESS_NAME}/0", "show-proxied-endpoints", wait=60)
+    raw = action_output.results.get("proxied-endpoints", "{}")
+    if isinstance(raw, str):
+        return json.loads(raw)
+    return dict(raw)
+
+
+def add_oidc_secret(juju: jubilant.Juju) -> Tuple[str, str]:
+    """Add a stub OIDC client-credentials Juju secret to the K8s model.
+
+    The content is not validated against a real IdP — the secret only exists
+    so the charm's ``_check_state`` exercises the OIDC code paths.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model.
+
+    Returns:
+        ``(secret_id, secret_uri)`` tuple.
+    """
+    name = "oidc_keys"
+    existing = next(
+        (s for s in juju.secrets() if s.label == name or s.name == name),
+        None,
+    )
+    if existing:
+        uri = str(existing.uri)
+    else:
+        uri = str(
+            juju.add_secret(
+                name=name,
+                content={"client-id": "stub-client-id", "client-secret": "stub-client-secret"},
+            )
+        )
+    return uri.split(":")[-1], uri
 
 
 def model_short_name(model_name: str) -> str:

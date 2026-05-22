@@ -213,3 +213,104 @@ def test_reindex_action(full_stack: jubilant.Juju):
 
     assert "result" in action_output.results
     assert "command succeeded" in action_output.results["result"]
+
+
+def test_ingress_routes_traffic(full_stack: jubilant.Juju):
+    """Verify Traefik publishes URLs for both ingress relations and they reach the workloads."""
+    juju = full_stack
+
+    logger.info("Fetching proxied endpoints from traefik-k8s/0")
+    endpoints = helpers.get_proxied_endpoints(juju)
+    logger.info("Traefik proxied endpoints: %s", endpoints)
+
+    urls = [v["url"] for v in endpoints.values() if isinstance(v, dict) and "url" in v]
+    assert urls, f"Traefik returned no proxied URLs: {endpoints}"
+
+    # Probe every URL Traefik exposes; record one frontend hit and one GMS hit.
+    frontend_ok = False
+    gms_ok = False
+    probes: list = []
+    for url in urls:
+        # Try the frontend root.
+        try:
+            r = requests.get(url, timeout=15, allow_redirects=False)
+            probes.append((url, "/", r.status_code))
+            if 200 <= r.status_code < 400:
+                frontend_ok = True
+        except requests.RequestException as e:
+            probes.append((url, "/", f"err:{e}"))
+
+        # Try the GMS /config endpoint.
+        config_url = url.rstrip("/") + "/config"
+        try:
+            r = requests.get(config_url, timeout=15)
+            probes.append((url, "/config", r.status_code))
+            if r.status_code == 200:
+                body = r.json()
+                if "versions" in body:
+                    gms_ok = True
+        except requests.RequestException as e:
+            probes.append((url, "/config", f"err:{e}"))
+
+    logger.info("Probe results: %s", probes)
+    assert frontend_ok, f"No URL served the frontend root: {probes}"
+    assert gms_ok, f"No URL served GMS /config with a valid body: {probes}"
+
+
+def test_oidc_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
+    """OIDC config without HTTPS ingress blocks; integrating TLS lets the charm recover."""
+    juju = full_stack
+    app = helpers.APP_NAME
+
+    logger.info("Adding stub OIDC secret and configuring the charm")
+    oidc_id, oidc_uri = helpers.add_oidc_secret(juju)
+    juju.grant_secret(oidc_uri, app)
+    juju.config(app, {"oidc-secret-id": oidc_id})
+
+    try:
+        logger.info("Waiting for charm to block on OIDC HTTPS requirement")
+
+        def _is_blocked_on_oidc(status: jubilant.Status) -> bool:
+            """Return True when the charm is blocked with the OIDC HTTPS message."""
+            app_status = status.apps.get(app)
+            if not app_status:
+                return False
+            msg = app_status.app_status.message or ""
+            return app_status.app_status.current == "blocked" and "OIDC requires an HTTPS" in msg
+
+        juju.wait(_is_blocked_on_oidc, timeout=5 * 60, delay=10, successes=1)
+
+        logger.info("Deploying self-signed-certificates and integrating with traefik-k8s")
+        juju.deploy(helpers.K8S_CERTIFICATES_NAME, channel=helpers.K8S_CERTIFICATES_CHANNEL)
+        helpers.wait_for_apps_status(
+            juju,
+            {helpers.K8S_CERTIFICATES_NAME: "active"},
+            timeout=10 * 60,
+        )
+        juju.integrate(helpers.INGRESS_NAME, helpers.K8S_CERTIFICATES_NAME)
+        helpers.wait_for_all_active(
+            juju,
+            [helpers.INGRESS_NAME, helpers.K8S_CERTIFICATES_NAME, app],
+            timeout=15 * 60,
+        )
+
+        logger.info("Verifying proxied URLs are now HTTPS")
+        endpoints = helpers.get_proxied_endpoints(juju)
+        urls = [v["url"] for v in endpoints.values() if isinstance(v, dict) and "url" in v]
+        assert urls, f"Traefik returned no proxied URLs after TLS integration: {endpoints}"
+        non_https = [u for u in urls if not u.startswith("https://")]
+        assert not non_https, f"Some proxied URLs are still plain http: {non_https}"
+
+    finally:
+        logger.info("Tearing down OIDC config and TLS integration so the model stays reusable")
+        juju.config(app, {"oidc-secret-id": ""})
+        try:
+            juju.remove_relation(helpers.INGRESS_NAME, helpers.K8S_CERTIFICATES_NAME)
+        except jubilant.CLIError as exc:
+            logger.warning("Failed to remove TLS relation cleanly: %s", exc)
+        helpers.wait_for_apps_status(
+            juju,
+            {app: "active"},
+            timeout=10 * 60,
+            raise_on_error=False,
+        )
