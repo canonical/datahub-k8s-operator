@@ -216,45 +216,27 @@ def test_reindex_action(full_stack: jubilant.Juju):
 
 
 def test_ingress_routes_traffic(full_stack: jubilant.Juju):
-    """Verify Traefik publishes URLs for both ingress relations and they reach the workloads."""
+    """Verify each Traefik publishes a URL that actually reaches its requirer endpoint."""
     juju = full_stack
 
-    logger.info("Fetching proxied endpoints from traefik-k8s/0")
-    endpoints = helpers.get_proxied_endpoints(juju)
-    logger.info("Traefik proxied endpoints: %s", endpoints)
+    fe_url = helpers.get_first_proxied_url(juju, helpers.INGRESS_FRONTEND_NAME)
+    gms_url = helpers.get_first_proxied_url(juju, helpers.INGRESS_GMS_NAME)
+    logger.info("Frontend ingress URL: %s", fe_url)
+    logger.info("GMS ingress URL: %s", gms_url)
 
-    urls = [v["url"] for v in endpoints.values() if isinstance(v, dict) and "url" in v]
-    assert urls, f"Traefik returned no proxied URLs: {endpoints}"
+    # Frontend serves an HTML SPA at the root.
+    fe_response = requests.get(fe_url, timeout=30, allow_redirects=False)
+    assert (
+        200 <= fe_response.status_code < 400
+    ), f"Expected 2xx/3xx from frontend ingress URL, got {fe_response.status_code}: {fe_response.text[:200]}"
 
-    # Probe every URL Traefik exposes; record one frontend hit and one GMS hit.
-    frontend_ok = False
-    gms_ok = False
-    probes: list = []
-    for url in urls:
-        # Try the frontend root.
-        try:
-            r = requests.get(url, timeout=15, allow_redirects=False)
-            probes.append((url, "/", r.status_code))
-            if 200 <= r.status_code < 400:
-                frontend_ok = True
-        except requests.RequestException as e:
-            probes.append((url, "/", f"err:{e}"))
-
-        # Try the GMS /config endpoint.
-        config_url = url.rstrip("/") + "/config"
-        try:
-            r = requests.get(config_url, timeout=15)
-            probes.append((url, "/config", r.status_code))
-            if r.status_code == 200:
-                body = r.json()
-                if "versions" in body:
-                    gms_ok = True
-        except requests.RequestException as e:
-            probes.append((url, "/config", f"err:{e}"))
-
-    logger.info("Probe results: %s", probes)
-    assert frontend_ok, f"No URL served the frontend root: {probes}"
-    assert gms_ok, f"No URL served GMS /config with a valid body: {probes}"
+    # GMS serves /config as JSON including a "versions" key.
+    gms_response = requests.get(f"{gms_url.rstrip('/')}/config", timeout=30)
+    assert (
+        gms_response.status_code == 200
+    ), f"Expected 200 from GMS /config, got {gms_response.status_code}: {gms_response.text[:200]}"
+    body = gms_response.json()
+    assert "versions" in body, f"GMS /config missing 'versions' key: {body}"
 
 
 def test_oidc_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
@@ -280,34 +262,40 @@ def test_oidc_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
 
         juju.wait(_is_blocked_on_oidc, timeout=5 * 60, delay=10, successes=1)
 
-        logger.info("Deploying self-signed-certificates and integrating with traefik-k8s")
+        logger.info("Deploying self-signed-certificates and integrating with both traefiks")
         juju.deploy(helpers.K8S_CERTIFICATES_NAME, channel=helpers.K8S_CERTIFICATES_CHANNEL)
         helpers.wait_for_apps_status(
             juju,
             {helpers.K8S_CERTIFICATES_NAME: "active"},
             timeout=10 * 60,
         )
-        juju.integrate(helpers.INGRESS_NAME, helpers.K8S_CERTIFICATES_NAME)
+        for traefik in helpers.INGRESS_APPS:
+            juju.integrate(
+                f"{traefik}:certificates",
+                f"{helpers.K8S_CERTIFICATES_NAME}:certificates",
+            )
         helpers.wait_for_all_active(
             juju,
-            [helpers.INGRESS_NAME, helpers.K8S_CERTIFICATES_NAME, app],
+            [*helpers.INGRESS_APPS, helpers.K8S_CERTIFICATES_NAME, app],
             timeout=15 * 60,
         )
 
-        logger.info("Verifying proxied URLs are now HTTPS")
-        endpoints = helpers.get_proxied_endpoints(juju)
-        urls = [v["url"] for v in endpoints.values() if isinstance(v, dict) and "url" in v]
-        assert urls, f"Traefik returned no proxied URLs after TLS integration: {endpoints}"
-        non_https = [u for u in urls if not u.startswith("https://")]
-        assert not non_https, f"Some proxied URLs are still plain http: {non_https}"
+        logger.info("Verifying both traefiks now publish HTTPS URLs")
+        for traefik in helpers.INGRESS_APPS:
+            url = helpers.get_first_proxied_url(juju, traefik)
+            assert url.startswith("https://"), f"{traefik} URL still plain http: {url}"
 
     finally:
-        logger.info("Tearing down OIDC config and TLS integration so the model stays reusable")
+        logger.info("Tearing down OIDC config and TLS integrations so the model stays reusable")
         juju.config(app, {"oidc-secret-id": ""})
-        try:
-            juju.remove_relation(helpers.INGRESS_NAME, helpers.K8S_CERTIFICATES_NAME)
-        except jubilant.CLIError as exc:
-            logger.warning("Failed to remove TLS relation cleanly: %s", exc)
+        for traefik in helpers.INGRESS_APPS:
+            try:
+                juju.remove_relation(
+                    f"{traefik}:certificates",
+                    f"{helpers.K8S_CERTIFICATES_NAME}:certificates",
+                )
+            except jubilant.CLIError as exc:
+                logger.warning("Failed to remove TLS relation for %s: %s", traefik, exc)
         helpers.wait_for_apps_status(
             juju,
             {app: "active"},

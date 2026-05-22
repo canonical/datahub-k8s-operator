@@ -34,8 +34,11 @@ CERTIFICATES_REVISION = 264
 ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
 ZOOKEEPER_REVISION = 149
-INGRESS_NAME = "traefik-k8s"
+INGRESS_CHARM = "traefik-k8s"
 INGRESS_CHANNEL = "latest/stable"
+INGRESS_FRONTEND_NAME = "traefik-frontend"
+INGRESS_GMS_NAME = "traefik-gms"
+INGRESS_APPS = (INGRESS_FRONTEND_NAME, INGRESS_GMS_NAME)
 K8S_CERTIFICATES_NAME = "self-signed-certificates"
 K8S_CERTIFICATES_CHANNEL = "latest/stable"
 
@@ -141,22 +144,21 @@ def deploy_charm(juju: jubilant.Juju, charm: Path, resources: dict) -> None:
     juju.grant_secret(secrets["encryption-keys-secret"][1], APP_NAME)
 
     # Setup the ingress.
-    juju.deploy(INGRESS_NAME, channel=INGRESS_CHANNEL, trust=True)
+    for traefik_app, requirer_endpoint in (
+        (INGRESS_FRONTEND_NAME, "frontend-ingress"),
+        (INGRESS_GMS_NAME, "gms-ingress"),
+    ):
+        juju.deploy(
+            INGRESS_CHARM,
+            app=traefik_app,
+            channel=INGRESS_CHANNEL,
+            trust=True,
+        )
+        juju.integrate(f"{APP_NAME}:{requirer_endpoint}", traefik_app)
+
     wait_for_apps_status(
         juju,
-        {
-            INGRESS_NAME: ("waiting", "active"),
-        },
-        timeout=5 * 60,
-        raise_on_error=False,
-    )
-    juju.integrate(f"{APP_NAME}:frontend-ingress", INGRESS_NAME)
-    juju.integrate(f"{APP_NAME}:gms-ingress", INGRESS_NAME)
-    wait_for_apps_status(
-        juju,
-        {
-            INGRESS_NAME: "active",
-        },
+        {name: "active" for name in INGRESS_APPS},
         timeout=10 * 60,
     )
 
@@ -193,23 +195,47 @@ def get_unit_url(juju: jubilant.Juju, application: str, unit: int, port: int, pr
     return f"{protocol}://{address}:{port}"
 
 
-def get_proxied_endpoints(juju: jubilant.Juju) -> Dict[str, Any]:
-    """Return the proxied endpoints exposed by ``traefik-k8s/0``.
+def get_proxied_endpoints(juju: jubilant.Juju, traefik_app: str) -> Dict[str, Any]:
+    """Return the proxied endpoints exposed by ``<traefik_app>/0``.
 
     Args:
         juju: Jubilant object pointing at the K8s model where Traefik is deployed.
+        traefik_app: Application name of the Traefik instance to query
+            (e.g. ``traefik-frontend`` or ``traefik-gms``).
 
     Returns:
         The parsed ``proxied-endpoints`` mapping returned by Traefik's
         ``show-proxied-endpoints`` action. Keys are ingress requirer
-        identifiers (typically the requirer app name, possibly suffixed
-        per-relation); each value is a dict with at least a ``url`` field.
+        identifiers; each value is a dict with at least a ``url`` field.
     """
-    action_output = juju.run(f"{INGRESS_NAME}/0", "show-proxied-endpoints", wait=60)
+    action_output = juju.run(f"{traefik_app}/0", "show-proxied-endpoints", wait=60)
     raw = action_output.results.get("proxied-endpoints", "{}")
     if isinstance(raw, str):
         return json.loads(raw)
     return dict(raw)
+
+
+def get_first_proxied_url(juju: jubilant.Juju, traefik_app: str) -> str:
+    """Return the first URL exposed by a Traefik app's ``show-proxied-endpoints``.
+
+    Args:
+        juju: Jubilant object.
+        traefik_app: Traefik app name.
+
+    Returns:
+        The first URL found that belongs to a requirer (i.e. excludes the
+        traefik-itself entry).
+
+    Raises:
+        ValueError: If no requirer URL is found.
+    """
+    endpoints = get_proxied_endpoints(juju, traefik_app)
+    for key, value in endpoints.items():
+        if key == traefik_app:
+            continue
+        if isinstance(value, dict) and "url" in value:
+            return value["url"]
+    raise ValueError(f"No requirer URL found in {traefik_app} proxied-endpoints: {endpoints}")
 
 
 def add_oidc_secret(juju: jubilant.Juju) -> Tuple[str, str]:

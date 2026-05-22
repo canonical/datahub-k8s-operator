@@ -174,20 +174,23 @@ juju run datahub-k8s/leader reindex clean=true
 
 ### Configuring Ingress
 
-The DataHub charm exposes the frontend and GMS services through the standard `ingress` interface, backed by [Traefik](https://charmhub.io/traefik-k8s).
+The DataHub charm exposes the frontend and GMS services through the standard `ingress` interface, backed by [Traefik](https://charmhub.io/traefik-k8s). Deploy one Traefik instance per ingress endpoint:
 
 ```sh
-juju deploy traefik-k8s --channel latest/stable --trust
-juju integrate datahub-k8s:frontend-ingress traefik-k8s
-juju integrate datahub-k8s:gms-ingress traefik-k8s
+juju deploy traefik-k8s --channel latest/stable --trust traefik-frontend
+juju deploy traefik-k8s --channel latest/stable --trust traefik-gms
+
+juju integrate datahub-k8s:frontend-ingress traefik-frontend
+juju integrate datahub-k8s:gms-ingress      traefik-gms
 ```
 
-Traefik assigns the external URLs and publishes them back to the charm via the relation. The frontend OIDC `AUTH_OIDC_BASE_URL` is taken from the Traefik-provided URL automatically, so no manual hostname configuration is needed.
+Each Traefik assigns its external URL and publishes it back to the charm via the relation. The frontend OIDC `AUTH_OIDC_BASE_URL` is taken from the `frontend-ingress` URL automatically, so no manual hostname configuration is needed.
 
-To inspect the URLs that Traefik has handed out:
+To inspect the URLs Traefik has handed out:
 
 ```sh
-juju run traefik-k8s/0 show-proxied-endpoints
+juju run traefik-frontend/0 show-proxied-endpoints
+juju run traefik-gms/0      show-proxied-endpoints
 ```
 
 TLS termination is configured on the Traefik side, see the [Traefik charm docs](https://charmhub.io/traefik-k8s) for how to wire it to a certificates provider (for example [self-signed-certificates](https://charmhub.io/self-signed-certificates) for local environments or [Lego](https://charmhub.io/lego) for ACME providers such as Let's Encrypt).
