@@ -181,7 +181,7 @@ juju deploy traefik-k8s --channel latest/stable --trust traefik-frontend
 juju deploy traefik-k8s --channel latest/stable --trust traefik-gms
 
 juju integrate datahub-k8s:frontend-ingress traefik-frontend
-juju integrate datahub-k8s:gms-ingress      traefik-gms
+juju integrate datahub-k8s:gms-ingress traefik-gms
 ```
 
 Each Traefik assigns its external URL and publishes it back to the charm via the relation. The frontend OIDC `AUTH_OIDC_BASE_URL` is taken from the `frontend-ingress` URL automatically, so no manual hostname configuration is needed.

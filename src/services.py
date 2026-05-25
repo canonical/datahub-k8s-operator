@@ -478,7 +478,7 @@ class FrontendService(AbstractService):
             raise exceptions.ImproperSecretError("secret pointed to by 'oidc-secret-id' has improper contents")
 
         fe_ingress = context.charm.frontend_ingress
-        oidc_base_url = fe_ingress.url if fe_ingress.is_ready() else "http://localhost:9002"
+        oidc_base_url = fe_ingress.url if fe_ingress.is_ready() else literals.FRONTEND_FALLBACK_URL
 
         oidc_env = {
             "AUTH_OIDC_ENABLED": "true",

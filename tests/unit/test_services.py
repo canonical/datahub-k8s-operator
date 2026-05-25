@@ -290,9 +290,9 @@ def test_frontend_oidc_base_url_uses_ingress_when_ready():
 
 
 def test_frontend_oidc_base_url_falls_back_when_ingress_not_ready():
-    """OIDC base URL falls back to localhost when the ingress relation is not ready."""
+    """OIDC base URL falls back to FRONTEND_FALLBACK_URL when the ingress relation is not ready."""
     env = _frontend_oidc_env(ingress_ready=False, ingress_url=None)
-    assert env["AUTH_OIDC_BASE_URL"] == "http://localhost:9002"
+    assert env["AUTH_OIDC_BASE_URL"] == literals.FRONTEND_FALLBACK_URL
 
 
 class TestFrontendRunInitialization:

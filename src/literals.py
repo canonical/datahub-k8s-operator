@@ -7,6 +7,7 @@ DB_NAME = "datahub_db"
 PLACEHOLDER_INDEX = "datahub_index"
 PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
+FRONTEND_FALLBACK_URL = f"http://localhost:{FRONTEND_PORT}"
 GMS_PORT = 8080
 
 INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
