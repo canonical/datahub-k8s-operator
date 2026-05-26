@@ -1,5 +1,5 @@
 ignore_files:
-- lib/charms/nginx_ingress_integrator/v0/nginx_route.py
+- lib/charms/traefik_k8s/v2/ingress.py
 
 rules:
   # Ignore "master" - branch names of repositories in references.

@@ -64,6 +64,7 @@ help:
 	@echo "  checks               Run all code quality checks"
 	@echo "  clean                Remove built charm and rock files"
 	@echo "  clean-charmcraft     Clean charmcraft environment"
+	@echo "  clean-dev            Remove tox, pytest/mypy/ruff caches, coverage data, build/, dist/, __pycache__/"
 	@echo "  clean-rockcraft      Clean all rockcraft environments"
 	@echo "  create-secret        Create a Juju secret with random encryption keys"
 	@echo "  deploy-local         Deploy charm with local resources using image digests (requires SECRET_ID=<id>)"
@@ -241,6 +242,21 @@ clean-rockcraft:
 	cd $(ACTIONS_DIR) && rockcraft clean
 	cd $(FRONTEND_DIR) && rockcraft clean
 	cd $(GMS_DIR) && rockcraft clean
+
+.PHONY: clean-dev
+clean-dev:
+	@echo "Cleaning developer caches and tool artifacts..."
+	rm -rf $(PROJECT_ROOT)/.tox
+	rm -rf $(PROJECT_ROOT)/.mypy_cache
+	rm -rf $(PROJECT_ROOT)/.pytest_cache
+	rm -rf $(PROJECT_ROOT)/.ruff_cache
+	rm -rf $(PROJECT_ROOT)/htmlcov
+	rm -rf $(PROJECT_ROOT)/build
+	rm -rf $(PROJECT_ROOT)/dist
+	rm -f  $(PROJECT_ROOT)/.coverage
+	rm -f  $(PROJECT_ROOT)/coverage.xml
+	find $(PROJECT_ROOT) -path '*/.git' -prune -o -type d -name '__pycache__' -exec rm -rf {} +
+	find $(PROJECT_ROOT) -path '*/.git' -prune -o -type d -name '*.egg-info' -exec rm -rf {} +
 
 # --- Virtual environment ---
 

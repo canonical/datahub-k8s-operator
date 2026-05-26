@@ -215,12 +215,12 @@ def test_frontend_compile_environment_includes_system_client():
         kafka_topic_prefix="",
         use_play_cache_session_store=False,
         oidc_secret_id=None,
-        external_fe_hostname="",
     )
     charm = SimpleNamespace(
         _state=state,
         config=config,
         model=model,
+        frontend_ingress=SimpleNamespace(is_ready=lambda: False, url=None),
         system_client_id=literals.SYSTEM_CLIENT_ID,
         system_client_secret="my-secret",  # nosec B106
     )
@@ -233,6 +233,66 @@ def test_frontend_compile_environment_includes_system_client():
     assert env is not None
     assert env["DATAHUB_SYSTEM_CLIENT_ID"] == literals.SYSTEM_CLIENT_ID
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
+
+
+def _frontend_oidc_env(*, ingress_ready, ingress_url):
+    """Build env from FrontendService with a stub ingress and OIDC secret configured."""
+    state = SimpleNamespace(
+        kafka_connection={
+            "bootstrap_server": "k:9092",
+            "username": "u",
+            "password": "p",  # nosec B105
+            "initialized": True,
+        },
+        opensearch_connection={
+            "host": "os",
+            "port": "9200",
+            "username": "u",
+            "password": "p",  # nosec B105
+            "tls-ca": "cert",
+            "initialized": True,
+        },
+        ran_upgrade=True,
+    )
+    enc_secret = SimpleNamespace(
+        get_content=lambda refresh=False: {"gms-key": "k1", "frontend-key": "k2"},
+    )
+    oidc_secret = SimpleNamespace(
+        get_content=lambda refresh=False: {"client-id": "cid", "client-secret": "csec"},
+    )
+    secrets_by_id = {"enc-id": enc_secret, "oidc-id": oidc_secret}
+    model = SimpleNamespace(get_secret=lambda id: secrets_by_id[id])
+    config = SimpleNamespace(
+        encryption_keys_secret_id="enc-id",  # nosec B106
+        opensearch_index_prefix="",
+        kafka_topic_prefix="",
+        use_play_cache_session_store=False,
+        oidc_secret_id="oidc-id",  # nosec B106
+    )
+    charm = SimpleNamespace(
+        _state=state,
+        config=config,
+        model=model,
+        frontend_ingress=SimpleNamespace(is_ready=lambda: ingress_ready, url=ingress_url),
+        system_client_id=literals.SYSTEM_CLIENT_ID,
+        system_client_secret="my-secret",  # nosec B106
+    )
+    context = services.ServiceContext(charm=charm)
+    with patch.object(services.FrontendService, "is_enabled", return_value=True):
+        with patch.dict(os.environ, {}, clear=True):
+            return services.FrontendService.compile_environment(context)
+
+
+def test_frontend_oidc_base_url_uses_ingress_when_ready():
+    """OIDC base URL is set from the ingress URL when the ingress relation is ready."""
+    env = _frontend_oidc_env(ingress_ready=True, ingress_url="https://traefik.example/datahub")
+    assert env["AUTH_OIDC_BASE_URL"] == "https://traefik.example/datahub"
+
+
+def test_frontend_oidc_base_url_falls_back_when_ingress_not_ready():
+    """OIDC base URL falls back to FRONTEND_FALLBACK_URL when the ingress relation is not ready."""
+    env = _frontend_oidc_env(ingress_ready=False, ingress_url=None)
+    assert env["AUTH_OIDC_BASE_URL"] == literals.FRONTEND_FALLBACK_URL
 
 
 class TestFrontendRunInitialization:

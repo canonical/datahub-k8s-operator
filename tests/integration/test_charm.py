@@ -213,3 +213,92 @@ def test_reindex_action(full_stack: jubilant.Juju):
 
     assert "result" in action_output.results
     assert "command succeeded" in action_output.results["result"]
+
+
+def test_ingress_routes_traffic(full_stack: jubilant.Juju):
+    """Verify each Traefik publishes a URL that actually reaches its requirer endpoint."""
+    juju = full_stack
+
+    fe_url = helpers.get_first_proxied_url(juju, helpers.INGRESS_FRONTEND_NAME)
+    gms_url = helpers.get_first_proxied_url(juju, helpers.INGRESS_GMS_NAME)
+    logger.info("Frontend ingress URL: %s", fe_url)
+    logger.info("GMS ingress URL: %s", gms_url)
+
+    # Frontend serves an HTML SPA at the root.
+    fe_response = requests.get(fe_url, timeout=30, allow_redirects=False)
+    assert (
+        200 <= fe_response.status_code < 400
+    ), f"Expected 2xx/3xx from frontend ingress URL, got {fe_response.status_code}: {fe_response.text[:200]}"
+
+    # GMS serves /config as JSON including a "versions" key.
+    gms_response = requests.get(f"{gms_url.rstrip('/')}/config", timeout=30)
+    assert (
+        gms_response.status_code == 200
+    ), f"Expected 200 from GMS /config, got {gms_response.status_code}: {gms_response.text[:200]}"
+    body = gms_response.json()
+    assert "versions" in body, f"GMS /config missing 'versions' key: {body}"
+
+
+def test_oidc_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
+    """OIDC config without HTTPS ingress blocks; integrating TLS lets the charm recover."""
+    juju = full_stack
+    app = helpers.APP_NAME
+
+    logger.info("Adding stub OIDC secret and configuring the charm")
+    oidc_id, oidc_uri = helpers.add_oidc_secret(juju)
+    juju.grant_secret(oidc_uri, app)
+    juju.config(app, {"oidc-secret-id": oidc_id})
+
+    try:
+        logger.info("Waiting for charm to block on OIDC HTTPS requirement")
+
+        def _is_blocked_on_oidc(status: jubilant.Status) -> bool:
+            """Return True when the charm is blocked with the OIDC HTTPS message."""
+            app_status = status.apps.get(app)
+            if not app_status:
+                return False
+            msg = app_status.app_status.message or ""
+            return app_status.app_status.current == "blocked" and "OIDC requires an HTTPS" in msg
+
+        juju.wait(_is_blocked_on_oidc, timeout=5 * 60, delay=10, successes=1)
+
+        logger.info("Deploying self-signed-certificates and integrating with both traefiks")
+        juju.deploy(helpers.K8S_CERTIFICATES_NAME, channel=helpers.K8S_CERTIFICATES_CHANNEL)
+        helpers.wait_for_apps_status(
+            juju,
+            {helpers.K8S_CERTIFICATES_NAME: "active"},
+            timeout=10 * 60,
+        )
+        for traefik in helpers.INGRESS_APPS:
+            juju.integrate(
+                f"{traefik}:certificates",
+                f"{helpers.K8S_CERTIFICATES_NAME}:certificates",
+            )
+        helpers.wait_for_all_active(
+            juju,
+            [*helpers.INGRESS_APPS, helpers.K8S_CERTIFICATES_NAME, app],
+            timeout=15 * 60,
+        )
+
+        logger.info("Verifying both traefiks now publish HTTPS URLs")
+        for traefik in helpers.INGRESS_APPS:
+            url = helpers.get_first_proxied_url(juju, traefik)
+            assert url.startswith("https://"), f"{traefik} URL still plain http: {url}"
+
+    finally:
+        logger.info("Tearing down OIDC config and TLS integrations so the model stays reusable")
+        juju.config(app, {"oidc-secret-id": ""})
+        for traefik in helpers.INGRESS_APPS:
+            try:
+                juju.remove_relation(
+                    f"{traefik}:certificates",
+                    f"{helpers.K8S_CERTIFICATES_NAME}:certificates",
+                )
+            except jubilant.CLIError as exc:
+                logger.warning("Failed to remove TLS relation for %s: %s", traefik, exc)
+        helpers.wait_for_apps_status(
+            juju,
+            {app: "active"},
+            timeout=10 * 60,
+            raise_on_error=False,
+        )
