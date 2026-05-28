@@ -16,6 +16,13 @@ import services as svc
 from charm import DatahubK8SOperatorCharm, get_pebble_layer
 
 
+def _stub_connections(charm):
+    """Stubs for the charm's relation connections."""
+    charm.db_relation = SimpleNamespace(connection={"host": "db"})
+    charm.kafka_relation = SimpleNamespace(connection={"host": "kafka"})
+    charm.opensearch_relation = SimpleNamespace(connection={"host": "os"})
+
+
 class TestGetPasswordAction:
     """Tests for the get-password action handler."""
 
@@ -109,28 +116,28 @@ class TestCheckStateSecretAccess:
 class TestSecretChanged:
     """Tests for the _on_secret_changed handler."""
 
-    def test_secret_changed_calls_update_for_configured_secret(self, charm_ctx, base_state):
-        """_on_secret_changed delegates to _update when the configured encryption secret changes."""  # noqa W505
+    def test_secret_changed_calls_reconcile_for_configured_secret(self, charm_ctx, base_state):
+        """_on_secret_changed delegates to reconcile when the configured encryption secret changes."""  # noqa W505
         secret = testing.Secret(
             tracked_content={"gms-key": "a", "frontend-key": "b"},
             label="datahub-encryption-keys",
         )
         state = testing.State(config=base_state.config, secrets=[secret])
 
-        with patch.object(DatahubK8SOperatorCharm, "_update") as mock_update:
+        with patch.object(DatahubK8SOperatorCharm, "reconcile") as mock_reconcile:
             charm_ctx.run(charm_ctx.on.secret_changed(secret), state)
 
-        mock_update.assert_called_once()
+        mock_reconcile.assert_called_once()
 
     def test_secret_changed_ignores_unrelated_secret(self, charm_ctx, base_state):
         """_on_secret_changed does nothing for secrets other than the configured encryption key."""
         unrelated_secret = testing.Secret(tracked_content={"some": "data"}, label="something-else")
         state = testing.State(config=base_state.config, secrets=[unrelated_secret])
 
-        with patch.object(DatahubK8SOperatorCharm, "_update") as mock_update:
+        with patch.object(DatahubK8SOperatorCharm, "reconcile") as mock_reconcile:
             charm_ctx.run(charm_ctx.on.secret_changed(unrelated_secret), state)
 
-        mock_update.assert_not_called()
+        mock_reconcile.assert_not_called()
 
     def test_secret_changed_blocks_on_inaccessible_secret(self, charm_ctx, base_state):
         """_on_secret_changed sets BlockedStatus when the configured secret is inaccessible."""
@@ -150,15 +157,6 @@ class TestSecretChanged:
 
 class TestSystemClientSecret:
     """Tests for system client secret persistence lifecycle."""
-
-    def test_returns_empty_without_peer_relation(self, charm_ctx):
-        """Returns empty string when peer relation is not yet available."""
-        state = testing.State(
-            config={"encryption-keys-secret-id": _SECRET_ID},
-            leader=True,
-        )
-        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
-            assert mgr.charm.system_client_secret == ""  # nosec B105
 
     def test_leader_creates_secret_on_first_access(self, charm_ctx):
         """Leader creates an app-owned secret and returns its value on first access."""
@@ -197,18 +195,9 @@ class TestCheckStateTrinoPatterns:
 
     @staticmethod
     def _state_with_patterns(base_state, trino_patterns):
-        """Build a test State that passes all checks before trino-patterns validation."""
-        peer = testing.PeerRelation(
-            endpoint="peer",
-            local_app_data={
-                "database_connection": json.dumps({"host": "db"}),
-                "kafka_connection": json.dumps({"host": "kafka"}),
-                "opensearch_connection": json.dumps({"host": "os"}),
-            },
-        )
+        """Build a State with `trino-patterns` set; connections are stubbed at runtime."""
         return testing.State(
             config={**base_state.config, "trino-patterns": trino_patterns},
-            relations=[peer],
         )
 
     def test_check_state_raises_on_invalid_json(self, charm_ctx, base_state):
@@ -216,6 +205,7 @@ class TestCheckStateTrinoPatterns:
         state = self._state_with_patterns(base_state, "not-json")
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 with pytest.raises(exceptions.UnreadyStateError) as exc_info:
                     mgr.charm._check_state()
 
@@ -226,6 +216,7 @@ class TestCheckStateTrinoPatterns:
         state = self._state_with_patterns(base_state, "[1, 2, 3]")
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 with pytest.raises(exceptions.UnreadyStateError) as exc_info:
                     mgr.charm._check_state()
 
@@ -238,6 +229,7 @@ class TestCheckStateTrinoPatterns:
         state = self._state_with_patterns(base_state, valid)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 mgr.charm._check_state()
 
     def test_update_status_blocks_on_invalid_patterns(self, charm_ctx, base_state):
@@ -245,6 +237,7 @@ class TestCheckStateTrinoPatterns:
         state = self._state_with_patterns(base_state, "{{bad}}")
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 state_out = mgr.run()
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)
@@ -263,18 +256,9 @@ class TestCheckStateOIDC:
 
     @staticmethod
     def _state_with_oidc(base_state, *, oidc_id="oidc-id"):
-        """Build a test State that satisfies the pre-OIDC checks in _check_state."""
-        peer = testing.PeerRelation(
-            endpoint="peer",
-            local_app_data={
-                "database_connection": json.dumps({"host": "db"}),
-                "kafka_connection": json.dumps({"host": "kafka"}),
-                "opensearch_connection": json.dumps({"host": "os"}),
-            },
-        )
+        """Build a State with `oidc-secret-id` set; connections are stubbed at runtime."""
         return testing.State(
             config={**base_state.config, "oidc-secret-id": oidc_id},
-            relations=[peer],
         )
 
     @staticmethod
@@ -287,6 +271,7 @@ class TestCheckStateOIDC:
         state = self._state_with_oidc(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 self._set_ingress(mgr.charm, ready=False, url=None)
                 with pytest.raises(exceptions.UnreadyStateError) as exc_info:
                     mgr.charm._check_state()
@@ -298,6 +283,7 @@ class TestCheckStateOIDC:
         state = self._state_with_oidc(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 self._set_ingress(mgr.charm, ready=True, url="http://datahub.example/foo")
                 with pytest.raises(exceptions.UnreadyStateError) as exc_info:
                     mgr.charm._check_state()
@@ -309,6 +295,7 @@ class TestCheckStateOIDC:
         state = self._state_with_oidc(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 self._set_ingress(mgr.charm, ready=True, url="https://datahub.example/")
                 mgr.charm._check_state()
 
@@ -317,22 +304,16 @@ class TestCheckStateOIDC:
         state = self._state_with_oidc(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 self._set_ingress(mgr.charm, ready=True, url="http://localhost:9002")
                 mgr.charm._check_state()
 
     def test_skipped_when_oidc_disabled(self, charm_ctx, base_state):
         """_check_state does not require ingress when OIDC is not configured."""
-        peer = testing.PeerRelation(
-            endpoint="peer",
-            local_app_data={
-                "database_connection": json.dumps({"host": "db"}),
-                "kafka_connection": json.dumps({"host": "kafka"}),
-                "opensearch_connection": json.dumps({"host": "os"}),
-            },
-        )
-        state = testing.State(config=base_state.config, relations=[peer])
+        state = testing.State(config=base_state.config)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
                 self._set_ingress(mgr.charm, ready=False, url=None)
                 mgr.charm._check_state()
 
@@ -355,3 +336,35 @@ class TestGetPebbleLayer:
             assert (
                 on_check_failure.get("up") == "restart"
             ), f"{service.name}: expected on-check-failure up=restart, got {on_check_failure!r}"
+
+
+class TestReconcileInitFailure:
+    """reconcile() sets BlockedStatus instead of re-raising on initialization failure."""
+
+    @staticmethod
+    def _encryption_secret_mock():
+        """Return a mock Juju secret with valid encryption key contents."""
+        mock_secret = MagicMock()
+        mock_secret.get_content.return_value = {"gms-key": "k1", "frontend-key": "k2"}
+        return mock_secret
+
+    def test_init_failure_sets_blocked_status(self, charm_ctx, base_state):
+        """run_initialization failure sets BlockedStatus instead of re-raising."""
+        fake_container = MagicMock()
+        fake_container.can_connect.return_value = True
+
+        # Use config_changed: its handler is a bare self.reconcile() with no
+        # extra pebble-health loop before it, so we reach run_initialization directly.
+        with charm_ctx(charm_ctx.on.config_changed(), base_state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
+                with patch.object(mgr.charm.unit, "get_container", return_value=fake_container):
+                    with patch.object(
+                        svc.GMSService,
+                        "run_initialization",
+                        side_effect=exceptions.InitializationFailedError("failed to initialize db"),
+                    ):
+                        state_out = mgr.run()
+
+        assert isinstance(state_out.unit_status, testing.BlockedStatus)
+        assert "failed to initialize db" in state_out.unit_status.message
