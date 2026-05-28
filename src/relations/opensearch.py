@@ -4,14 +4,9 @@
 """Define DataHub-Opensearch relation."""
 
 import logging
-from typing import Union
+from typing import Dict, Optional
 
-from charms.data_platform_libs.v0.data_interfaces import (
-    AuthenticationEvent,
-    DatabaseEndpointsChangedEvent,
-    IndexCreatedEvent,
-)
-from ops import WaitingStatus, framework
+from ops import framework
 
 from log import log_event_handler
 
@@ -19,7 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 class OpenSearchRelation(framework.Object):
-    """Client for datahub:opensearch relations."""
+    """Client for datahub:opensearch relations.
+
+    Stateless: connection details are read live from the data_platform_libs
+    requirer rather than cached in peer data.
+
+    Attributes:
+        charm: The charm this relation is attached to.
+        connection: Live OpenSearch connection dict (host/port/user/pass/tls-ca) or None.
+    """
 
     def __init__(self, charm):
         """Construct.
@@ -34,46 +37,44 @@ class OpenSearchRelation(framework.Object):
         charm.framework.observe(charm.opensearch.on.index_created, self._on_opensearch_changed)
         charm.framework.observe(charm.on.opensearch_relation_broken, self._on_relation_broken)
 
+    @property
+    def connection(self) -> Optional[Dict[str, str]]:
+        """Return the current OpenSearch connection details, or None when unrelated.
+
+        Reads relation data on demand via data_platform_libs; the password
+        comes from the juju secret published by the provider.
+        """
+        relations = list(self.charm.opensearch.relations)
+        if not relations:
+            return None
+        relation_id = relations[0].id
+        try:
+            data = self.charm.opensearch.fetch_relation_data([relation_id]).get(relation_id, {})
+        except Exception:  # noqa: BLE001 — lib raises in relation-broken events
+            return None
+        endpoints = data.get("endpoints")
+        username = data.get("username")
+        password = data.get("password")
+        tls_ca = data.get("tls-ca")
+        if not (endpoints and username and password and tls_ca):
+            return None
+        host, port = endpoints.split(",", 1)[0].split(":")
+        return {
+            "host": host,
+            "port": port,
+            "username": username,
+            "password": password,
+            "tls-ca": tls_ca,
+        }
+
     @log_event_handler(logger)
-    def _on_opensearch_changed(
-        self, event: Union[DatabaseEndpointsChangedEvent, IndexCreatedEvent, AuthenticationEvent]
-    ) -> None:
-        """Handle Opensearch change events.
+    def _on_opensearch_changed(self, event) -> None:
+        """Handle endpoints-changed / index-created events.
 
         Args:
             event: The event triggered when Opensearch changes.
         """
-        if not self.charm.unit.is_leader():
-            return
-
-        if not self.charm._state.is_ready():
-            return
-
-        self.charm.unit.status = WaitingStatus(f"handling {event.relation.name} change")
-        host, port = event.endpoints.split(",", 1)[0].split(":")
-
-        if self.charm._state.opensearch_connection is None:
-            self.charm._state.opensearch_connection = {}
-
-        conn = self.charm._state.opensearch_connection
-        conn["host"] = host
-        conn["port"] = port
-        conn["username"] = event.username
-        conn["password"] = event.password
-        conn["tls-ca"] = event.tls_ca
-
-        # Opensearch can fail to create the index, handle by deferring.
-        if any((v is None for v in conn.values())):
-            logger.info("missing credentials from the opensearch relation, returning")
-            return
-
-        # TODO (mertalpt): Check if it is possible to attach to an uninitialized
-        # Opensearch deployment without breaking the existing relation first.
-        if conn.get("initialized") is None:
-            conn["initialized"] = False
-
-        self.charm._state.opensearch_connection = conn
-        self.charm._update(event)
+        self.charm.reconcile()
 
     @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
@@ -82,11 +83,4 @@ class OpenSearchRelation(framework.Object):
         Args:
             event: The event triggered when the relation is broken.
         """
-        if not self.charm.unit.is_leader():
-            return
-
-        if not self.charm._state.is_ready():
-            return
-
-        self.charm._state.opensearch_connection = None
-        self.charm._update(event)
+        self.charm.reconcile()

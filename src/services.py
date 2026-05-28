@@ -7,15 +7,9 @@
 # TODO (mertalpt): Convert the module to a package and split up services.
 
 # Some General Notes
-# 1. `charm._state` does not behave in the standard Python way, you cannot get a reference
-#    to an object inside it and update it. For lasting updates you need to an assignment with
-#    the updated object.
-# 2. `process.wait()` causes some scripts (i.e. datahub-upgrade) to get stuck, which is why we use
+# 1. `process.wait()` causes some scripts (i.e. datahub-upgrade) to get stuck, which is why we use
 #    `process.wait_output()` even though we do not read the output. It does not have the same
 #    problem for some reason.
-# 3. Flags in `charm._state` have three states: True, False, None. Logic for them is very specific
-#    depending on the point in the program lifecycle and at certain places, explicit checks with
-#   `is` is required over general truthiness checks.
 
 import abc
 import logging
@@ -25,6 +19,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urlparse
 
 import yaml
+from ops.pebble import CheckStatus
 
 import exceptions
 import literals
@@ -272,9 +267,8 @@ class ActionsService(AbstractService):
             Whether the service is ready to be initialized.
         """
         checks = (
-            context.charm._state.ran_upgrade,
-            utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
             GMSService.is_enabled(context),
+            context.charm.kafka_relation.connection is not None,
             context.charm.system_client_id,
             context.charm.system_client_secret,
         )
@@ -293,7 +287,7 @@ class ActionsService(AbstractService):
         if not cls.is_enabled(context):
             return None
 
-        kafka_conn = context.charm._state.kafka_connection
+        kafka_conn = context.charm.kafka_relation.connection
 
         env = {
             "JAVA_HOME": literals.JAVA_HOME,
@@ -355,9 +349,7 @@ class FrontendService(AbstractService):
         Returns:
             Whether the service should be enabled.
         """
-        is_ready = cls.is_ready(context)
-        checks = (context.charm._state.frontend_user_props_initialized is True,)
-        return is_ready and all(checks)
+        return cls.is_ready(context)
 
     @classmethod
     def is_ready(cls, context: ServiceContext) -> bool:
@@ -369,13 +361,7 @@ class FrontendService(AbstractService):
         Returns:
             Whether the service is ready to be initialized.
         """
-        checks = (
-            context.charm._state.ran_upgrade,
-            utils.get_from_optional_dict(context.charm._state.kafka_connection, "initialized"),
-            utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized"),
-            GMSService.is_enabled(context),
-        )
-        return all(checks)
+        return GMSService.is_enabled(context)
 
     @classmethod
     def compile_environment(cls, context: ServiceContext) -> Optional[Dict[str, str]]:  # noqa C901
@@ -393,8 +379,8 @@ class FrontendService(AbstractService):
         if not cls.is_enabled(context):
             return None
 
-        kafka_conn = context.charm._state.kafka_connection
-        os_conn = context.charm._state.opensearch_connection
+        kafka_conn = context.charm.kafka_relation.connection
+        os_conn = context.charm.opensearch_relation.connection
 
         encryption_secret = context.charm.model.get_secret(id=context.charm.config.encryption_keys_secret_id)
         frontend_secret_key = encryption_secret.get_content(refresh=True)["frontend-key"]
@@ -514,24 +500,21 @@ class FrontendService(AbstractService):
             logger.info("datahub-frontend is not ready to be initialized, skipping initialization")
             return False
 
-        user_props_done = context.charm._state.frontend_user_props_initialized is True
-
         container = context.charm.unit.get_container(cls.name)
 
-        # Step 1: Push user.props credential file.
-        if not user_props_done:
-            password = context.charm._ensure_password()
-            if not password:
-                logger.info("Admin password not yet available, skipping frontend initialization")
-                return False
-            utils.push_contents_to_file(container, f"datahub:{password}", "/datahub-frontend/conf/user.props", 0o644)
-            context.charm._state.frontend_user_props_initialized = True
+        # Step 1: Push user.props credential file. If content is the same on
+        # each reconcile, re-pushing is a no-op for the workload.
+        password = context.charm._ensure_password()
+        if not password:
+            logger.info("Admin password not yet available, skipping frontend initialization")
+            return False
+        utils.push_contents_to_file(container, f"datahub:{password}", "/datahub-frontend/conf/user.props", 0o644)
 
         # Step 2: Truststore initialization for Opensearch SSL.
-        # Runs unconditionally on every _update. _import_certificates_to_truststore
+        # Runs unconditionally on every reconcile. _import_certificates_to_truststore
         # has per-alias dedup so re-runs are cheap; running every time is what
         # makes the truststore self-heal after missing cacerts.
-        certificates = context.charm._state.opensearch_connection["tls-ca"]
+        certificates = context.charm.opensearch_relation.connection["tls-ca"]
         try:
             _import_certificates_to_truststore(
                 container,
@@ -588,9 +571,7 @@ class GMSService(AbstractService):
         Returns:
             Whether the service should be enabled.
         """
-        is_ready = cls.is_ready(context)
-        checks = (context.charm._state.ran_upgrade,)
-        return is_ready and all(checks)
+        return cls.is_ready(context)
 
     @classmethod
     def is_ready(cls, context: ServiceContext) -> bool:
@@ -603,9 +584,9 @@ class GMSService(AbstractService):
             Whether the service is ready to be initialized.
         """
         checks = (
-            context.charm._state.database_connection is not None,
-            context.charm._state.kafka_connection is not None,
-            context.charm._state.opensearch_connection is not None,
+            context.charm.db_relation.connection is not None,
+            context.charm.kafka_relation.connection is not None,
+            context.charm.opensearch_relation.connection is not None,
         )
         return all(checks)
 
@@ -622,9 +603,9 @@ class GMSService(AbstractService):
         if not cls.is_enabled(context):
             return None
 
-        db_conn = context.charm._state.database_connection
-        kafka_conn = context.charm._state.kafka_connection
-        os_conn = context.charm._state.opensearch_connection
+        db_conn = context.charm.db_relation.connection
+        kafka_conn = context.charm.kafka_relation.connection
+        os_conn = context.charm.opensearch_relation.connection
 
         encryption_secret = context.charm.model.get_secret(id=context.charm.config.encryption_keys_secret_id)
         gms_secret_key = encryption_secret.get_content(refresh=True)["gms-key"]
@@ -711,15 +692,12 @@ class GMSService(AbstractService):
     def _set_workload_version(cls, context: ServiceContext) -> None:
         """Extract and set the workload version from the GMS container's rockcraft.yaml.
 
-        Guarded by a state flag so it runs at most once per container lifecycle.
-        On failure, the flag stays unset so the operation retries on the next _update call.
+        `unit.set_workload_version` is a no-op when the value is unchanged,
+        so it's safe to run on every reconcile rather than gate on peer state.
 
         Args:
             context: Context for the service.
         """
-        if context.charm._state.gms_workload_version_set is True:
-            return
-
         container = context.charm.unit.get_container(cls.name)
         try:
             meta_file = container.pull("/rockcraft.yaml")
@@ -729,9 +707,6 @@ class GMSService(AbstractService):
             context.charm.unit.set_workload_version(meta["version"])
         except Exception as e:
             logger.warning("Could not set workload version: %s", str(e))
-            return
-
-        context.charm._state.gms_workload_version_set = True
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
@@ -744,6 +719,14 @@ class GMSService(AbstractService):
         2. Opensearch index creation (create-indices.sh)
         3. Truststore initialization for Opensearch SSL
         4. DataHub upgrade (SystemUpdate job, also handles Kafka topic creation)
+
+        Statelessness note: steps 1, 2 and 4 are one-time backend bootstrap. They
+        only need to run while GMS is not yet serving. Once the `up` health check
+        passes, the schema, indices and SystemUpdate marker all exist, so we skip
+        them to avoid the JVM-heavy upgrade on every reconcile. They re-run
+        automatically on a fresh container (no pebble plan yet -> `up` check absent).
+        The truststore import (step 3) is exempt: it is cheap and must self-heal
+        unconditionally.
 
         Args:
             context: Context for the service.
@@ -759,24 +742,53 @@ class GMSService(AbstractService):
             return False
 
         container = context.charm.unit.get_container(cls.name)
+        gms_serving = cls._gms_is_serving(container)
 
-        # Step 1: PostgreSQL setup
-        cls._run_postgresql_setup(context, container)
-
-        # Step 2: Opensearch index creation
-        cls._run_opensearch_setup(context, container)
+        if gms_serving:
+            logger.debug("GMS is already serving; skipping one-time backend bootstrap")
+        else:
+            # Step 1: PostgreSQL setup
+            cls._run_postgresql_setup(context, container)
+            # Step 2: Opensearch index creation
+            cls._run_opensearch_setup(context, container)
 
         # Step 3: Truststore initialization
         cls._run_truststore_init(context, container)
 
-        # Step 4: DataHub upgrade (SystemUpdate)
-        cls._run_upgrade(context, container)
+        if not gms_serving:
+            # Step 4: DataHub upgrade (SystemUpdate)
+            cls._run_upgrade(context, container)
 
         return True
 
+    @staticmethod
+    def _gms_is_serving(container) -> bool:
+        """Return True when the GMS `up` health check is passing.
+
+        Used as a stateless precondition: a serving GMS implies the one-time
+        backend bootstrap (schema, indices, SystemUpdate) has already completed.
+        Returns False on a fresh container where the pebble plan, and therefore
+        the `up` check, does not exist yet.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            Whether the GMS `up` check reports UP.
+        """
+        try:
+            check = container.get_check("up")
+        except Exception:  # noqa: BLE001 — check absent on fresh container
+            return False
+        return check.status == CheckStatus.UP
+
     @classmethod
     def _run_postgresql_setup(cls, context: ServiceContext, container) -> None:
-        """Run PostgreSQL setup if not already initialized.
+        """Run PostgreSQL setup against the related DB.
+
+        Idempotent since the init script uses `CREATE TABLE IF NOT EXISTS` etc.
+        Gated by the caller on GMS-not-serving, so it runs on fresh containers
+        and self-heals on pod recreation rather than on every reconcile.
 
         Args:
             context: Context for the service.
@@ -785,13 +797,7 @@ class GMSService(AbstractService):
         Raises:
             InitializationFailedError: If the initialization fails.
         """
-        is_initialized = utils.get_from_optional_dict(context.charm._state.database_connection, "initialized")
-        if is_initialized:
-            logger.debug("db is already initialized, skipping initialization")
-            return
-
-        logger.info("Running db initialization")
-        db_conn = context.charm._state.database_connection
+        db_conn = context.charm.db_relation.connection
         environment = {
             "POSTGRES_USERNAME": db_conn["username"],
             "POSTGRES_PASSWORD": db_conn["password"],
@@ -814,13 +820,14 @@ class GMSService(AbstractService):
             raise exceptions.InitializationFailedError("failed to initialize db")
 
         logger.info("Successful db initialization")
-        conn = context.charm._state.database_connection
-        conn["initialized"] = True
-        context.charm._state.database_connection = conn
 
     @classmethod
     def _run_opensearch_setup(cls, context: ServiceContext, container) -> None:
-        """Run Opensearch index creation if not already initialized.
+        """Run Opensearch index creation against the related cluster.
+
+        Idempotent since `create-indices.sh` uses `PUT` with `IF NOT EXISTS`
+        semantics. Gated by the caller on GMS-not-serving, so it runs on fresh
+        containers and self-heals on pod recreation rather than every reconcile.
 
         Args:
             context: Context for the service.
@@ -829,13 +836,7 @@ class GMSService(AbstractService):
         Raises:
             InitializationFailedError: If the initialization fails.
         """
-        is_initialized = utils.get_from_optional_dict(context.charm._state.opensearch_connection, "initialized")
-        if is_initialized:
-            logger.debug("Opensearch is already initialized, skipping initialization")
-            return
-
-        logger.info("Running Opensearch initialization")
-        os_conn = context.charm._state.opensearch_connection
+        os_conn = context.charm.opensearch_relation.connection
         environment = {
             "ELASTICSEARCH_HOST": os_conn["host"],
             "ELASTICSEARCH_PORT": os_conn["port"],
@@ -854,8 +855,7 @@ class GMSService(AbstractService):
         # That intervention can be in the form of setting an environment variable to let
         # curl use the required certificates.
         environment["CURL_CA_BUNDLE"] = literals.OPENSEARCH_CERTIFICATES_PATH
-        certificates = context.charm._state.opensearch_connection["tls-ca"]
-        utils.push_contents_to_file(container, certificates, literals.OPENSEARCH_CERTIFICATES_PATH, 0o644)
+        utils.push_contents_to_file(container, os_conn["tls-ca"], literals.OPENSEARCH_CERTIFICATES_PATH, 0o644)
         try:
             logger.info("Running the initialization script for Opensearch")
             process = container.exec(
@@ -870,9 +870,6 @@ class GMSService(AbstractService):
             raise exceptions.InitializationFailedError("failed to initialize opensearch")
 
         logger.info("Successful Opensearch initialization")
-        conn = context.charm._state.opensearch_connection
-        conn["initialized"] = True
-        context.charm._state.opensearch_connection = conn
 
     @classmethod
     def _run_truststore_init(cls, context: ServiceContext, container) -> None:
@@ -885,7 +882,7 @@ class GMSService(AbstractService):
         Raises:
             InitializationFailedError: If the initialization fails.
         """
-        certificates = context.charm._state.opensearch_connection["tls-ca"]
+        certificates = context.charm.opensearch_relation.connection["tls-ca"]
 
         try:
             _import_certificates_to_truststore(
@@ -912,10 +909,10 @@ class GMSService(AbstractService):
         Raises:
             InitializationFailedError: If the initialization fails.
         """
-        if context.charm._state.ran_upgrade:
-            logger.debug("Already ran datahub-upgrade, skipping")
-            return
-
+        # SystemUpdate is the JVM-heavy bootstrap. The caller gates it on
+        # GMS-not-serving so it runs once per container lifecycle (fresh pod)
+        # rather than on every reconcile. SystemUpdate is itself idempotent, so
+        # re-running on pod recreation is safe.
         logger.info("Running datahub-upgrade job")
         environment = cls._compile_upgrade_environment(context)
         try:
@@ -938,13 +935,6 @@ class GMSService(AbstractService):
             raise exceptions.InitializationFailedError("failed to run jobs for datahub-upgrade")
 
         logger.info("Successful datahub-upgrade run")
-        context.charm._state.ran_upgrade = True
-
-        # The SystemUpdate job also creates Kafka topics (merged upstream),
-        # so mark Kafka as initialized.
-        conn = context.charm._state.kafka_connection
-        conn["initialized"] = True
-        context.charm._state.kafka_connection = conn
 
     @classmethod
     def _compile_upgrade_environment(cls, context: ServiceContext) -> Dict[str, str]:
@@ -956,9 +946,9 @@ class GMSService(AbstractService):
         Returns:
             A dictionary of environment variables for the upgrade job.
         """
-        db_conn = context.charm._state.database_connection
-        kafka_conn = context.charm._state.kafka_connection
-        os_conn = context.charm._state.opensearch_connection
+        db_conn = context.charm.db_relation.connection
+        kafka_conn = context.charm.kafka_relation.connection
+        os_conn = context.charm.opensearch_relation.connection
 
         env = {
             "DATAHUB_ANALYTICS_ENABLED": "true",
