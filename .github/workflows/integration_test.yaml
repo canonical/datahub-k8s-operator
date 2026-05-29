@@ -18,8 +18,9 @@ jobs:
       packages: write
     with:
       runs-on: "self-hosted-linux-amd64-noble-xlarge"
-      use-canonical-k8s: true
+      provider: "k8s"
       channel: "1.32-classic/stable"
+      use-canonical-k8s: true
       juju-channel: "3/stable"
       trivy-severity-config: CRITICAL
       modules: '["test_charm.py", "test_upgrade.py", "test_scaling.py"]'
