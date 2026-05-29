@@ -470,7 +470,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         self.reconcile()
 
-    def reconcile(self):
+    def reconcile(self):  # noqa: C901
         """Reconcile the charm to its desired state.
 
         Single entry point for every observer. Reads current config + relation
@@ -510,7 +510,11 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
             pebble_layer = get_pebble_layer(service, context)
             container.add_layer(service.name, pebble_layer, combine=True)
-            container.replan()
+            try:
+                container.replan()
+            except ops.pebble.ChangeError as e:
+                logger.warning("Pebble replan failed for '%s': %s", service.name, str(e))
+                return
 
         self._reconcile_trino_if_ready()
 
