@@ -7,7 +7,6 @@ import logging
 import os
 import subprocess  # nosec B404
 import sys
-import tempfile
 from pathlib import Path
 from typing import Dict
 

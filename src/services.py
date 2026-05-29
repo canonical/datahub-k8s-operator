@@ -743,19 +743,22 @@ class GMSService(AbstractService):
 
         container = context.charm.unit.get_container(cls.name)
         gms_serving = cls._gms_is_serving(container)
+        is_leader = context.charm.unit.is_leader()
 
         if gms_serving:
             logger.debug("GMS is already serving; skipping one-time backend bootstrap")
-        else:
+        elif is_leader:
             # Step 1: PostgreSQL setup
             cls._run_postgresql_setup(context, container)
             # Step 2: Opensearch index creation
             cls._run_opensearch_setup(context, container)
+        else:
+            logger.debug("Non-leader unit; leader handles backend bootstrap")
 
-        # Step 3: Truststore initialization
+        # Step 3: Truststore initialization (per-container, always runs)
         cls._run_truststore_init(context, container)
 
-        if not gms_serving:
+        if not gms_serving and is_leader:
             # Step 4: DataHub upgrade (SystemUpdate)
             cls._run_upgrade(context, container)
 
