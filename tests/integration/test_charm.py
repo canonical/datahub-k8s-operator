@@ -17,12 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _get_password(juju: jubilant.Juju) -> str:
     """Get admin password via the get-password action."""
-    action_output = juju.run(f"{helpers.APP_NAME}/0", "get-password", wait=60)
-    password = action_output.results.get("password", "")
-    if not password:
-        raise ValueError("get-password action did not return a password")
-    logger.info("Fetched admin password via get-password action")
-    return password
+    return helpers.get_admin_password(juju)
 
 
 @pytest.fixture(scope="module")
@@ -32,78 +27,10 @@ def full_stack(k8s_juju: jubilant.Juju, lxd_juju: jubilant.Juju, charm: Path, ro
     helpers.deploy_charm(k8s_juju, charm, rock_resources)
 
     logger.info("Deploying LXD dependencies")
-    lxd_juju.deploy(helpers.KAFKA_NAME, channel=helpers.KAFKA_CHANNEL, revision=helpers.KAFKA_REVISION)
-    lxd_juju.deploy(
-        helpers.OPENSEARCH_NAME,
-        channel=helpers.OPENSEARCH_CHANNEL,
-        num_units=2,
-        revision=helpers.OPENSEARCH_REVISION,
-    )
-    lxd_juju.deploy(helpers.POSTGRES_NAME, channel=helpers.POSTGRES_CHANNEL, revision=helpers.POSTGRES_REVISION)
-    lxd_juju.deploy(
-        helpers.CERTIFICATES_NAME,
-        channel=helpers.CERTIFICATES_CHANNEL,
-        revision=helpers.CERTIFICATES_REVISION,
-    )
-    lxd_juju.deploy(helpers.ZOOKEPER_NAME, channel=helpers.ZOOKEEPER_CHANNEL, revision=helpers.ZOOKEEPER_REVISION)
+    helpers.deploy_lxd_dependencies(lxd_juju)
 
-    logger.info("Waiting for LXD dependencies to settle")
-    helpers.wait_for_apps_status(
-        lxd_juju,
-        {
-            helpers.POSTGRES_NAME: "active",
-            helpers.CERTIFICATES_NAME: "active",
-            helpers.ZOOKEPER_NAME: "active",
-            helpers.KAFKA_NAME: ("blocked", "waiting"),
-            helpers.OPENSEARCH_NAME: ("blocked", "waiting"),
-        },
-        timeout=30 * 60,
-        raise_on_error=False,
-    )
-
-    logger.info("Integrating LXD dependencies")
-    lxd_juju.integrate(helpers.KAFKA_NAME, helpers.ZOOKEPER_NAME)
-    lxd_juju.integrate(helpers.OPENSEARCH_NAME, helpers.CERTIFICATES_NAME)
-    helpers.wait_for_all_active(
-        lxd_juju,
-        [
-            helpers.KAFKA_NAME,
-            helpers.OPENSEARCH_NAME,
-            helpers.POSTGRES_NAME,
-            helpers.CERTIFICATES_NAME,
-            helpers.ZOOKEPER_NAME,
-        ],
-        timeout=20 * 60,
-    )
-
-    logger.info("Creating offers")
-    lxd_juju.offer(helpers.KAFKA_NAME, endpoint="kafka-client", name=helpers.KAFKA_OFFER_NAME)
-    lxd_juju.offer(helpers.OPENSEARCH_NAME, endpoint="opensearch-client", name=helpers.OPENSEARCH_OFFER_NAME)
-    lxd_juju.offer(helpers.POSTGRES_NAME, endpoint="database", name=helpers.POSTGRES_OFFER_NAME)
-
-    lxd_model = helpers.model_short_name(lxd_juju.model or "")
-    if not lxd_model:
-        raise ValueError("Could not determine LXD model name")
-
-    logger.info("Consuming offers")
-    k8s_juju.consume(f"{lxd_model}.{helpers.KAFKA_OFFER_NAME}")
-    k8s_juju.consume(f"{lxd_model}.{helpers.OPENSEARCH_OFFER_NAME}")
-    k8s_juju.consume(f"{lxd_model}.{helpers.POSTGRES_OFFER_NAME}")
-
-    logger.info("Waiting for K8s applications to settle")
-    helpers.wait_for_apps_status(
-        k8s_juju,
-        {
-            helpers.APP_NAME: ("blocked", "waiting", "maintenance", "active"),
-        },
-        timeout=20 * 60,
-        raise_on_error=False,
-    )
-
-    logger.info("Integrating consumed offers")
-    k8s_juju.integrate(f"{helpers.APP_NAME}:kafka", helpers.KAFKA_OFFER_NAME)
-    k8s_juju.integrate(f"{helpers.APP_NAME}:opensearch", helpers.OPENSEARCH_OFFER_NAME)
-    k8s_juju.integrate(f"{helpers.APP_NAME}:db", helpers.POSTGRES_OFFER_NAME)
+    logger.info("Consuming offers and integrating DataHub")
+    helpers.consume_and_integrate(k8s_juju, lxd_juju)
 
     helpers.wait_for_all_active(k8s_juju, [helpers.APP_NAME], timeout=30 * 60)
 
