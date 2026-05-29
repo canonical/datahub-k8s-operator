@@ -21,6 +21,8 @@ jobs:
       provider: "k8s"
       channel: "1.32-classic/stable"
       use-canonical-k8s: true
+      extra-arguments: |
+        --kube-config=~/.kube/config
       juju-channel: "3/stable"
       trivy-severity-config: CRITICAL
       modules: '["test_charm.py", "test_upgrade.py", "test_scaling.py"]'
