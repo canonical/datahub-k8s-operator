@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Set
 from charms.trino_k8s.v0.trino_catalog import (
     TrinoCatalogRequirer,  # pylint: disable=E0611
 )
-from ops import WaitingStatus, framework
+from ops import framework
 
 import graphql
 import literals
@@ -466,12 +466,7 @@ class TrinoRelation(framework.Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not self.charm._state.is_ready():
-            return
-
-        self.charm.unit.status = WaitingStatus("handling trino-catalog change")
-        self.reconcile_ingestions()
-        self.charm._update(event)
+        self.charm.reconcile()
 
     @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
@@ -483,11 +478,8 @@ class TrinoRelation(framework.Object):
         if not self.charm.unit.is_leader():
             return
 
-        if not self.charm._state.is_ready():
-            return
-
         self._cleanup_managed_ingestions()
-        self.charm._update(event)
+        self.charm.reconcile()
 
     def reconcile_ingestions(self) -> None:
         """Reconcile Juju-managed Trino ingestion sources with current relation state."""

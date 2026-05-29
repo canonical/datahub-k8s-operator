@@ -11,6 +11,63 @@ import literals
 import services
 
 
+def _kafka_conn(initialized=True):  # noqa: D401 — helper
+    """Return a Kafka connection dict matching the relation.connection shape."""
+    return {
+        "bootstrap_server": "kafka:9092",
+        "username": "u",
+        "password": "p",  # nosec B105
+    }
+
+
+def _db_conn():
+    """Return a DB connection dict matching the relation.connection shape."""
+    return {
+        "host": "db",
+        "port": "5432",
+        "username": "u",
+        "password": "p",  # nosec B105
+        "dbname": "datahub_db",
+    }
+
+
+def _os_conn(tls_ca="PEM-CERT"):
+    """Return an OpenSearch connection dict matching the relation.connection shape."""
+    return {
+        "host": "os",
+        "port": "9200",
+        "username": "u",
+        "password": "p",  # nosec B105
+        "tls-ca": tls_ca,
+    }
+
+
+def _make_charm(
+    *,
+    db=None,
+    kafka=None,
+    opensearch=None,
+    config=None,
+    model=None,
+    frontend_ingress=None,
+    unit=None,
+    ensure_password=None,
+):
+    """Build a SimpleNamespace charm with the stateless relation surface."""
+    return SimpleNamespace(
+        db_relation=SimpleNamespace(connection=db),
+        kafka_relation=SimpleNamespace(connection=kafka),
+        opensearch_relation=SimpleNamespace(connection=opensearch),
+        config=config or SimpleNamespace(),
+        model=model or SimpleNamespace(),
+        frontend_ingress=frontend_ingress or SimpleNamespace(is_ready=lambda: False, url=None),
+        unit=unit or SimpleNamespace(),
+        system_client_id=literals.SYSTEM_CLIENT_ID,
+        system_client_secret="my-secret",  # nosec B106
+        _ensure_password=ensure_password or (lambda: "s3cret"),  # nosec B106
+    )
+
+
 def test_compile_standard_proxy_environment():
     """Compile standard proxy variables from Juju proxy environment."""
     with patch.dict(
@@ -36,22 +93,8 @@ def test_compile_standard_proxy_environment():
 
 def test_actions_compile_environment_includes_proxy_vars():
     """Actions environment should include standard proxy variables."""
-    state = SimpleNamespace(
-        kafka_connection={
-            "bootstrap_server": "kafka:9092",
-            "username": "user",
-            "password": "pass",  # nosec
-        }
-    )
     config = SimpleNamespace(kafka_topic_prefix="")
-    context = services.ServiceContext(
-        charm=SimpleNamespace(
-            _state=state,
-            config=config,
-            system_client_id=literals.SYSTEM_CLIENT_ID,
-            system_client_secret="my-secret",  # nosec B106
-        )
-    )
+    context = services.ServiceContext(charm=_make_charm(kafka=_kafka_conn(), config=config))
 
     with patch.object(services.ActionsService, "is_enabled", return_value=True):
         with patch.dict(
@@ -76,22 +119,8 @@ def test_actions_compile_environment_includes_proxy_vars():
 
 def test_actions_compile_environment_omits_proxy_vars_when_unset():
     """Actions environment should not include proxy variables when model proxy is unset."""
-    state = SimpleNamespace(
-        kafka_connection={
-            "bootstrap_server": "kafka:9092",
-            "username": "user",
-            "password": "pass",  # nosec
-        }
-    )
     config = SimpleNamespace(kafka_topic_prefix="")
-    context = services.ServiceContext(
-        charm=SimpleNamespace(
-            _state=state,
-            config=config,
-            system_client_id=literals.SYSTEM_CLIENT_ID,
-            system_client_secret="my-secret",  # nosec B106
-        )
-    )
+    context = services.ServiceContext(charm=_make_charm(kafka=_kafka_conn(), config=config))
 
     with patch.object(services.ActionsService, "is_enabled", return_value=True):
         with patch.dict(os.environ, {}, clear=True):
@@ -107,32 +136,7 @@ def test_actions_compile_environment_omits_proxy_vars_when_unset():
 
 
 def test_gms_compile_environment_includes_system_client():
-    """GMS environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET from trino_relation."""
-    state = SimpleNamespace(
-        database_connection={
-            "host": "db",
-            "port": "5432",
-            "username": "u",
-            "password": "p",  # nosec
-            "dbname": "datahub_db",
-            "initialized": True,
-        },
-        kafka_connection={
-            "bootstrap_server": "kafka:9092",
-            "username": "u",
-            "password": "p",  # nosec
-            "initialized": True,
-        },
-        opensearch_connection={
-            "host": "os",
-            "port": "9200",
-            "username": "u",
-            "password": "p",  # nosec
-            "tls-ca": "cert",
-            "initialized": True,
-        },
-        ran_upgrade=True,
-    )
+    """GMS environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET."""
     encryption_secret = SimpleNamespace(
         get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
     )
@@ -142,12 +146,12 @@ def test_gms_compile_environment_includes_system_client():
         opensearch_index_prefix="",
         kafka_topic_prefix="",
     )
-    charm = SimpleNamespace(
-        _state=state,
+    charm = _make_charm(
+        db=_db_conn(),
+        kafka=_kafka_conn(),
+        opensearch=_os_conn(tls_ca="cert"),
         config=config,
         model=model,
-        system_client_id=literals.SYSTEM_CLIENT_ID,
-        system_client_secret="my-secret",  # nosec B106
     )
     context = services.ServiceContext(charm=charm)
 
@@ -161,21 +165,8 @@ def test_gms_compile_environment_includes_system_client():
 
 def test_actions_compile_environment_includes_system_client():
     """Actions environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET."""
-    state = SimpleNamespace(
-        kafka_connection={
-            "bootstrap_server": "kafka:9092",
-            "username": "user",
-            "password": "pass",  # nosec
-        }
-    )
     config = SimpleNamespace(kafka_topic_prefix="")
-    charm = SimpleNamespace(
-        _state=state,
-        config=config,
-        system_client_id=literals.SYSTEM_CLIENT_ID,
-        system_client_secret="my-secret",  # nosec B106
-    )
-    context = services.ServiceContext(charm=charm)
+    context = services.ServiceContext(charm=_make_charm(kafka=_kafka_conn(), config=config))
 
     with patch.object(services.ActionsService, "is_enabled", return_value=True):
         with patch.dict(os.environ, {}, clear=True):
@@ -188,23 +179,6 @@ def test_actions_compile_environment_includes_system_client():
 
 def test_frontend_compile_environment_includes_system_client():
     """Frontend environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET."""
-    state = SimpleNamespace(
-        kafka_connection={
-            "bootstrap_server": "kafka:9092",
-            "username": "u",
-            "password": "p",  # nosec
-            "initialized": True,
-        },
-        opensearch_connection={
-            "host": "os",
-            "port": "9200",
-            "username": "u",
-            "password": "p",  # nosec
-            "tls-ca": "cert",
-            "initialized": True,
-        },
-        ran_upgrade=True,
-    )
     encryption_secret = SimpleNamespace(
         get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
     )
@@ -216,13 +190,11 @@ def test_frontend_compile_environment_includes_system_client():
         use_play_cache_session_store=False,
         oidc_secret_id=None,
     )
-    charm = SimpleNamespace(
-        _state=state,
+    charm = _make_charm(
+        kafka=_kafka_conn(),
+        opensearch=_os_conn(tls_ca="cert"),
         config=config,
         model=model,
-        frontend_ingress=SimpleNamespace(is_ready=lambda: False, url=None),
-        system_client_id=literals.SYSTEM_CLIENT_ID,
-        system_client_secret="my-secret",  # nosec B106
     )
     context = services.ServiceContext(charm=charm)
 
@@ -237,23 +209,6 @@ def test_frontend_compile_environment_includes_system_client():
 
 def _frontend_oidc_env(*, ingress_ready, ingress_url):
     """Build env from FrontendService with a stub ingress and OIDC secret configured."""
-    state = SimpleNamespace(
-        kafka_connection={
-            "bootstrap_server": "k:9092",
-            "username": "u",
-            "password": "p",  # nosec B105
-            "initialized": True,
-        },
-        opensearch_connection={
-            "host": "os",
-            "port": "9200",
-            "username": "u",
-            "password": "p",  # nosec B105
-            "tls-ca": "cert",
-            "initialized": True,
-        },
-        ran_upgrade=True,
-    )
     enc_secret = SimpleNamespace(
         get_content=lambda refresh=False: {"gms-key": "k1", "frontend-key": "k2"},
     )
@@ -269,13 +224,12 @@ def _frontend_oidc_env(*, ingress_ready, ingress_url):
         use_play_cache_session_store=False,
         oidc_secret_id="oidc-id",  # nosec B106
     )
-    charm = SimpleNamespace(
-        _state=state,
+    charm = _make_charm(
+        kafka=_kafka_conn(),
+        opensearch=_os_conn(tls_ca="cert"),
         config=config,
         model=model,
         frontend_ingress=SimpleNamespace(is_ready=lambda: ingress_ready, url=ingress_url),
-        system_client_id=literals.SYSTEM_CLIENT_ID,
-        system_client_secret="my-secret",  # nosec B106
     )
     context = services.ServiceContext(charm=charm)
     with patch.object(services.FrontendService, "is_enabled", return_value=True):
@@ -299,115 +253,81 @@ class TestFrontendRunInitialization:
     """Tests for FrontendService.run_initialization user.props and truststore steps."""
 
     @staticmethod
-    def _make_context(*, user_props_done=False, password="s3cret"):
+    def _make_context(*, password="s3cret"):
         """Build a ServiceContext wired for FrontendService initialization tests."""
-        state = SimpleNamespace(
-            kafka_connection={
-                "bootstrap_server": "k:9092",
-                "username": "u",
-                "password": "p",
-                "initialized": True,
-            },  # nosec B105
-            opensearch_connection={
-                "host": "os",
-                "port": "9200",
-                "username": "u",
-                "password": "p",
-                "tls-ca": "PEM-CERT",
-                "initialized": True,
-            },  # nosec B105
-            ran_upgrade=True,
-            frontend_user_props_initialized=user_props_done,
-        )
-        container = SimpleNamespace(push=lambda *a, **kw: None)
+        pushed: list = []
+        container = SimpleNamespace(push=lambda *args, **kwargs: pushed.append((args, kwargs)))
         unit = SimpleNamespace(get_container=lambda name: container)
-        charm = SimpleNamespace(
-            _state=state,
-            _ensure_password=lambda: password,
+        charm = _make_charm(
+            kafka=_kafka_conn(),
+            opensearch=_os_conn(),
             unit=unit,
+            ensure_password=lambda: password,
         )
-        return services.ServiceContext(charm=charm)
-
-    def test_pushes_user_props_when_not_done(self):
-        """user.props is pushed and flag is set when not yet initialized."""
-        context = self._make_context(user_props_done=False)
-
-        with patch.object(services.FrontendService, "is_ready", return_value=True):
-            with patch.object(services, "_import_certificates_to_truststore"):
-                result = services.FrontendService.run_initialization(context)
-
-        assert result is True
-        assert context.charm._state.frontend_user_props_initialized is True
+        return services.ServiceContext(charm=charm), pushed
 
     def test_truststore_runs_unconditionally(self):
-        """Truststore import runs even when user.props is already initialized.
-
-        Truststore self-heals after missing cacerts. _import_certificates_to_truststore
-        does its own per-alias dedup, so re-runs are cheap.
-        """
-        context = self._make_context(user_props_done=True)
+        """Truststore import runs on every reconcile, regardless of prior runs."""
+        context, _pushed = self._make_context()
 
         with patch.object(services.FrontendService, "is_ready", return_value=True):
             with patch.object(services, "_import_certificates_to_truststore") as mock_import:
+                container = context.charm.unit.get_container("datahub-frontend")
+                container.pull = lambda path: SimpleNamespace(read=lambda: "x")
                 services.FrontendService.run_initialization(context)
 
         mock_import.assert_called_once()
 
     def test_returns_false_when_password_unavailable(self):
-        """Returns False without setting flag when password is empty."""
-        context = self._make_context(user_props_done=False, password="")  # nosec B106
+        """Returns False when the admin password has not been generated yet."""
+        context, _pushed = self._make_context(password="")  # nosec B106
 
         with patch.object(services.FrontendService, "is_ready", return_value=True):
             with patch.object(services, "_import_certificates_to_truststore"):
                 result = services.FrontendService.run_initialization(context)
 
         assert result is False
-        assert context.charm._state.frontend_user_props_initialized is False
+
+
+class TestGMSServingGate:
+    """Tests for GMSService._gms_is_serving (the one-time-setup precondition)."""
+
+    def test_true_when_up_check_passing(self):
+        """Reports serving when the `up` pebble check is UP."""
+        check = SimpleNamespace(status=services.CheckStatus.UP)
+        container = SimpleNamespace(get_check=lambda name: check)
+        assert services.GMSService._gms_is_serving(container) is True
+
+    def test_false_when_up_check_down(self):
+        """Reports not-serving when the `up` check is not UP."""
+        check = SimpleNamespace(status=services.CheckStatus.DOWN)
+        container = SimpleNamespace(get_check=lambda name: check)
+        assert services.GMSService._gms_is_serving(container) is False
+
+    def test_false_when_check_absent(self):
+        """Reports not-serving on a fresh container with no pebble plan / check."""
+
+        def _raise(name):
+            """Simulate get_check raising when the check doesn't exist."""
+            raise RuntimeError("no such check")
+
+        container = SimpleNamespace(get_check=_raise)
+        assert services.GMSService._gms_is_serving(container) is False
 
 
 class TestGMSSetWorkloadVersion:
-    """Tests for GMSService._set_workload_version."""
+    """Tests for GMSService._set_workload_version (stateless — always tries to set)."""
 
-    @staticmethod
-    def _make_context(*, version_set=False):
-        """Build a ServiceContext wired for GMS workload version tests."""
-        state = SimpleNamespace(gms_workload_version_set=version_set)
+    def test_sets_version(self):
+        """Workload version is set from the container's rockcraft.yaml."""
         version_holder = SimpleNamespace(value=None)
         unit = SimpleNamespace(
             get_container=lambda name: SimpleNamespace(pull=lambda path: "version: '1.4.0.5'"),
             set_workload_version=lambda v: setattr(version_holder, "value", v),
         )
-        charm = SimpleNamespace(_state=state, unit=unit)
-        context = services.ServiceContext(charm=charm)
-        return context, version_holder
-
-    def test_sets_version_when_flag_unset(self):
-        """Workload version is set and flag is marked True."""
-        context, holder = self._make_context(version_set=False)
-
-        services.GMSService._set_workload_version(context)
-
-        assert holder.value == "1.4.0.5"
-        assert context.charm._state.gms_workload_version_set is True
-
-    def test_skips_when_flag_already_set(self):
-        """Workload version extraction is skipped when already done."""
-        context, holder = self._make_context(version_set=True)
-
-        services.GMSService._set_workload_version(context)
-
-        assert holder.value is None
-
-    def test_retries_on_failure(self):
-        """Flag stays unset on failure so the operation retries on next call."""
-        state = SimpleNamespace(gms_workload_version_set=False)
-        unit = SimpleNamespace(
-            get_container=lambda name: SimpleNamespace(pull=lambda path: (_ for _ in ()).throw(Exception("not ready"))),
-            set_workload_version=lambda v: None,
-        )
-        charm = SimpleNamespace(_state=state, unit=unit)
+        charm = _make_charm(unit=unit)
         context = services.ServiceContext(charm=charm)
 
         services.GMSService._set_workload_version(context)
 
-        assert state.gms_workload_version_set is not True
+        assert version_holder.value == "1.4.0.5"

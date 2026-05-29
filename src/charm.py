@@ -29,7 +29,6 @@ from relations.kafka import KafkaRelation
 from relations.opensearch import OpenSearchRelation
 from relations.postgresql import PostgresqlRelation
 from relations.trino import TrinoRelation
-from state import State
 from structured_config import CharmConfig
 
 logger = logging.getLogger(__name__)
@@ -93,7 +92,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
     """Charm the application.
 
     Attributes:
-        _state: Used to store persistent data between invocations.
         config_type: Class used to store the config.
         system_client_id: The DataHub system client identifier for API auth.
         system_client_secret: The DataHub system client secret for API auth.
@@ -108,7 +106,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             framework: Object to initialize the charm instance.
         """
         super().__init__(framework)
-        self._state = State(self.app, lambda: self.model.get_relation("peer"))
 
         # Services
         for service in SERVICES:
@@ -181,12 +178,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: Event instance being handled.
         """
-        if event.workload.name == services.FrontendService.name:
-            self._state.frontend_user_props_initialized = False
-        if event.workload.name == services.GMSService.name:
-            self._state.gms_workload_version_set = False
-
-        self._update(event)
+        self.reconcile()
 
     @log_event_handler(logger)
     def _on_reindex_action(self, event):
@@ -247,9 +239,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The event triggered when the configuration is changed.
         """
-        self.unit.status = ops.WaitingStatus("configuring application")
-        self._reconcile_trino_if_ready()
-        self._update(event)
+        self.reconcile()
 
     @log_event_handler(logger)
     def _on_secret_changed(self, event):
@@ -260,12 +250,12 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         encryption_keys_secret_id = self.config.encryption_keys_secret_id
         # ID from the event is in URI format that is painful to handle.
-        # Worst case of a false positive is a redundant `_update` which is no issue.
+        # Worst case of a false positive is a redundant reconcile which is no issue.
         id_match = encryption_keys_secret_id and event.secret.id.endswith(encryption_keys_secret_id)
         label_match = event.secret.label == literals.ENCRYPTION_KEYS_SECRET_LABEL
 
         if id_match or label_match:
-            self._update(event)
+            self.reconcile()
 
     @log_event_handler(logger)
     def _on_peer_relation_changed(self, event):
@@ -274,7 +264,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The event triggered when the relation is changed.
         """
-        self._update(event)
+        self.reconcile()
 
     @log_event_handler(logger)
     def _on_update_status(self, event):  # noqa C901  # pylint: disable=R0915
@@ -330,7 +320,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         if is_invalid:
             logger.info("invalid plan detected, attempting replanning")
-            self._update(event)
+            self.reconcile()
         elif is_not_ready:
             logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
@@ -338,14 +328,11 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
-            self._reconcile_trino_if_ready()
-            self.unit.status = ops.ActiveStatus()
+            self.reconcile()
 
     def _reconcile_trino_if_ready(self):
         """Run Trino ingestion reconciliation if preconditions are met."""
         if not self.unit.is_leader():
-            return
-        if not self._state.is_ready():
             return
         if not self.model.get_relation("trino-catalog"):
             return
@@ -393,11 +380,11 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 "secret pointed to by 'encryption-keys-secret-id' has improper contents"
             )
 
-        # Check all required relations exist.
+        # Check all required relations have published connection data.
         relations = {
-            "db": not self._state.database_connection,
-            "kafka": not self._state.kafka_connection,
-            "opensearch": not self._state.opensearch_connection,
+            "db": self.db_relation.connection is None,
+            "kafka": self.kafka_relation.connection is None,
+            "opensearch": self.opensearch_relation.connection is None,
         }
 
         if any(relations.values()):
@@ -433,51 +420,43 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             )
 
     def _get_password(self):
-        """Return the existing admin password, or None if it has not been generated yet."""
-        relation = self.model.get_relation("peer")
-        if not relation:
-            return None
+        """Return the existing admin password, or None if it has not been generated yet.
 
-        secret_id = relation.data[self.app].get(literals.INIT_PWD_SECRET_LABEL, None)
-        if not secret_id:
+        Stateless lookup where the secret is found via its label.
+        """
+        try:
+            secret = self.model.get_secret(label=literals.INIT_PWD_SECRET_LABEL)
+        except ops.SecretNotFoundError:
             return None
-
-        secret = self.model.get_secret(id=secret_id)
         return secret.get_content(refresh=True).get("password") or None
 
     def _ensure_password(self):
-        """Return the admin password, generating one on the leader if it does not exist yet."""
+        """Return the admin password, generating one on the leader if it does not exist yet.
+
+        Stateless secret creation, the leader uses a label so any unit can look it up.
+        """
         password = self._get_password()
         if password:
             return password
 
-        relation = self.model.get_relation("peer")
-        if not relation:
-            return ""
-
         if self.unit.is_leader():
             content = {"password": secrets.token_urlsafe(24)}
-            secret = self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
-            relation.data[self.app][literals.INIT_PWD_SECRET_LABEL] = secret.id
+            self.app.add_secret(content, label=literals.INIT_PWD_SECRET_LABEL)
             return content["password"]
 
         return ""
 
     def _get_or_create_system_client_secret(self):
         """Return the system client secret, creating it on the leader if it does not exist."""
-        relation = self.model.get_relation("peer")
-        if not relation:
-            return ""
-
-        secret_id = relation.data[self.app].get(literals.SYSTEM_CLIENT_SECRET_LABEL)
-        if secret_id:
-            secret = self.model.get_secret(id=secret_id)
+        try:
+            secret = self.model.get_secret(label=literals.SYSTEM_CLIENT_SECRET_LABEL)
             return secret.get_content(refresh=True).get("secret") or ""
+        except ops.SecretNotFoundError:
+            pass
 
         if self.unit.is_leader():
             content = {"secret": utils.generate_secret(64)}
-            secret = self.app.add_secret(content, label=literals.SYSTEM_CLIENT_SECRET_LABEL)
-            relation.data[self.app][literals.SYSTEM_CLIENT_SECRET_LABEL] = secret.id
+            self.app.add_secret(content, label=literals.SYSTEM_CLIENT_SECRET_LABEL)
             return content["secret"]
 
         return ""
@@ -489,16 +468,14 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The ingress ready/revoked event.
         """
-        self._update(event)
+        self.reconcile()
 
-    def _update(self, event):
-        """Update the DataHub configuration and replan its execution.
+    def reconcile(self):
+        """Reconcile the charm to its desired state.
 
-        Args:
-            event: The event triggered when the relation changed.
-
-        Raises:
-            Exception: If an initialization fails for an unknown reason.
+        Single entry point for every observer. Reads current config + relation
+        state, decides whether the charm is ready, then ensures every workload
+        container is initialised and its pebble layer matches the expectations.
         """
         try:
             self._check_state()
@@ -520,10 +497,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                     return
                 service.run_initialization(context)
         except Exception as e:
-            # TODO (mertalpt): This is likely to result in an error loop,
-            # can we solve it another way?
-            logger.error("Failed to initialize service '%s' due to error: '%s'", service.name, str(e))
-            raise
+            logger.error("Failed to initialize service '%s': %s", service.name, str(e))
+            self.unit.status = ops.BlockedStatus(str(e))
+            return
 
         # Update services.
         for service in SERVICES:
@@ -536,7 +512,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             container.add_layer(service.name, pebble_layer, combine=True)
             container.replan()
 
-        self.unit.status = ops.MaintenanceStatus("replanning application")
+        self._reconcile_trino_if_ready()
+
+        self.unit.status = ops.ActiveStatus()
 
 
 if __name__ == "__main__":  # pragma: nocover
