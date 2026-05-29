@@ -44,9 +44,7 @@ def setup_hybrid_cloud():
     subprocess.run(["/snap/bin/juju", "bootstrap", "localhost", LXD_CONTROLLER], check=False)  # nosec B603
 
     # Obtain the Canonical Kubernetes admin kubeconfig.
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-        subprocess.run(["/usr/bin/sudo", "k8s", "config"], stdout=f, check=True)  # nosec B603
-        kubeconfig = f.name
+    kubeconfig = os.path.expanduser("~/.kube/config")
 
     # Register the canonical-k8s cluster as a cloud on the LXD controller.
     # `juju add-k8s` reads the cluster + credential from $KUBECONFIG.
@@ -57,7 +55,6 @@ def setup_hybrid_cloud():
         check=False,
         env={**os.environ, "KUBECONFIG": kubeconfig},
     )  # nosec B603
-    os.unlink(kubeconfig)
     if result.returncode != 0:
         if "already exists" in result.stderr or "already exists" in result.stdout:
             logger.info("Canonical Kubernetes cloud already configured")
