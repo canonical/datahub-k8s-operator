@@ -5,10 +5,12 @@
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import jubilant
+import requests
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -319,6 +321,64 @@ def get_unit_url(juju: jubilant.Juju, application: str, unit: int, port: int, pr
         raise ValueError(f"No reachable address found for unit '{unit_name}'")
 
     return f"{protocol}://{address}:{port}"
+
+
+def request_until(
+    session: Optional[requests.Session],
+    method: str,
+    url: str,
+    *,
+    expected_status: int = 200,
+    attempts: int = 60,
+    delay: float = 10.0,
+    timeout: float = 15.0,
+    **kwargs: Any,
+) -> requests.Response:
+    """Issue an HTTP request, retrying until it returns ``expected_status``.
+
+    Args:
+        session: A requests Session (to carry cookies across calls) or None for
+            a plain stateless request.
+        method: HTTP method, e.g. "GET" or "POST".
+        url: Target URL.
+        expected_status: Status code to wait for (default 200).
+        attempts: Maximum number of attempts (default 60).
+        delay: Seconds to sleep between attempts (default 10).
+        timeout: Per-request timeout in seconds (default 15).
+        kwargs: Forwarded to requests (e.g. ``json=``).
+
+    Returns:
+        The first response with ``expected_status``, or the last one seen.
+
+    Raises:
+        AssertionError: If every attempt raised a connection error.
+    """
+    requester = session.request if session is not None else requests.request
+    last_response: Optional[requests.Response] = None
+    last_error: Optional[Exception] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requester(method, url, timeout=timeout, **kwargs)
+        except requests.RequestException as exc:
+            last_error = exc
+            logger.info("%s %s failed: %s (attempt %d/%d)", method, url, exc, attempt, attempts)
+        else:
+            if response.status_code == expected_status:
+                return response
+            last_response = response
+            logger.info(
+                "%s %s -> %d, want %d (attempt %d/%d)",
+                method,
+                url,
+                response.status_code,
+                expected_status,
+                attempt,
+                attempts,
+            )
+        time.sleep(delay)
+    if last_response is not None:
+        return last_response
+    raise AssertionError(f"{method} {url} never returned a response: {last_error}")
 
 
 def get_proxied_endpoints(juju: jubilant.Juju, traefik_app: str) -> Dict[str, Any]:

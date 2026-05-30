@@ -9,6 +9,7 @@ PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
 FRONTEND_FALLBACK_URL = f"http://localhost:{FRONTEND_PORT}"
 GMS_PORT = 8080
+HEALTHCHECK_RESTART_GRACE_FAILURES = 60
 
 INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
 ENCRYPTION_KEYS_SECRET_LABEL = "datahub-encryption-keys"  # nosec B105

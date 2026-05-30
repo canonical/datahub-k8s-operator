@@ -5,6 +5,7 @@
 """Run integration tests."""
 
 import logging
+import time
 from pathlib import Path
 
 import helpers
@@ -59,38 +60,16 @@ def test_deploy_full(full_stack: jubilant.Juju):
     admin_pwd = _get_password(full_stack)
 
     url = f"{base_url}/logIn"
+    login_payload = {"username": "datahub", "password": admin_pwd}
     logger.info("Testing against URL: %s", url)
 
-    def _can_login(_: jubilant.Status) -> bool:
-        """Attempt login and return True on success."""
-        try:
-            response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
-
-            if response.status_code == 200:
-                return True
-
-            logger.info(
-                "Login failed | Status: %d | Body: %s | Headers: %s",
-                response.status_code,
-                response.text[:500],  # Truncate to avoid flooding logs
-                response.headers,
-            )
-            return False
-
-        except requests.RequestException as e:
-            # This catches connection errors, timeouts, and DNS issues
-            logger.info("Login connection error: %s", str(e))
-            return False
-
-    logger.info("Waiting for frontend to be ready")
-    full_stack.wait(_can_login, timeout=15 * 60, delay=10, successes=1)
-
-    response = requests.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
-    assert response.status_code == 200
+    logger.info("Waiting for frontend to accept an admin login")
+    response = helpers.request_until(None, "POST", url, json=login_payload)
+    assert response.status_code == 200, f"login never succeeded: {response.status_code} {response.text[:500]}"
 
     logger.info("Verifying GMS workload version is embedded")
     gms_url = helpers.get_unit_url(full_stack, helpers.APP_NAME, 0, 8080)
-    config_response = requests.get(f"{gms_url}/config", timeout=10)
+    config_response = helpers.request_until(None, "GET", f"{gms_url}/config")
     assert config_response.status_code == 200
     versions = config_response.json().get("versions", {})
     datahub_info = versions.get("acryldata/datahub", {})
@@ -107,20 +86,29 @@ def test_deploy_full(full_stack: jubilant.Juju):
     # response.
     logger.info("Verifying GMS can serve search queries (OpenSearch TLS path)")
     session = requests.Session()
-    login_response = session.post(url, json={"username": "datahub", "password": admin_pwd}, timeout=10)
+    login_response = helpers.request_until(session, "POST", url, json=login_payload)
     assert login_response.status_code == 200
 
     graphql_url = f"{base_url}/api/v2/graphql"
     query = {"query": ('{ searchAcrossEntities(input: {types: [DATASET], query: "*", count: 1})' " { total } }")}
-    search_response = session.post(graphql_url, json=query, timeout=15)
-    assert (
-        search_response.status_code == 200
-    ), f"GraphQL request returned {search_response.status_code}: {search_response.text[:500]}"
 
-    body = search_response.json()
-    errors = body.get("errors") or []
-    search_total = body.get("data", {}).get("searchAcrossEntities", {}).get("total")
-    ssl_errors = [e for e in errors if any(token in str(e) for token in ("PKIX", "SSL", "version='unknown'"))]
+    errors: list = []
+    ssl_errors: list = []
+    search_total = None
+    body: dict = {}
+    for _ in range(30):
+        search_response = helpers.request_until(session, "POST", graphql_url, json=query)
+        assert (
+            search_response.status_code == 200
+        ), f"GraphQL request returned {search_response.status_code}: {search_response.text[:500]}"
+        body = search_response.json()
+        errors = body.get("errors") or []
+        search_total = body.get("data", {}).get("searchAcrossEntities", {}).get("total")
+        ssl_errors = [e for e in errors if any(token in str(e) for token in ("PKIX", "SSL", "version='unknown'"))]
+        if not errors and search_total is not None:
+            break
+        time.sleep(10)
+
     logger.info(
         "DATAHUB_GMS_SEARCH errors=%d ssl_errors=%d total_present=%s",
         len(errors),

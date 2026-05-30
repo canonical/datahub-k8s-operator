@@ -12,6 +12,7 @@ import pytest
 from ops import testing
 
 import exceptions
+import literals
 import services as svc
 from charm import DatahubK8SOperatorCharm, get_pebble_layer
 
@@ -321,11 +322,8 @@ class TestCheckStateOIDC:
 class TestGetPebbleLayer:
     """Tests for the get_pebble_layer helper."""
 
-    def test_services_with_healthcheck_use_pebble_restart(self):
-        """Services that define a healthcheck must use on-check-failure: restart.
-
-        This ensures pebble can recover a live-but-stuck GMS or frontend.
-        """
+    def test_services_with_healthcheck_use_ignore_not_pebble_restart(self):
+        """Healthcheck services wire the `up` check to on-check-failure: ignore."""
         context = MagicMock()
         for service in [svc.GMSService, svc.FrontendService]:
             with patch.object(service, "is_enabled", return_value=True):
@@ -334,8 +332,54 @@ class TestGetPebbleLayer:
 
             on_check_failure = layer["services"][service.name].get("on-check-failure")
             assert (
-                on_check_failure.get("up") == "restart"
-            ), f"{service.name}: expected on-check-failure up=restart, got {on_check_failure!r}"
+                on_check_failure.get("up") == "ignore"
+            ), f"{service.name}: expected on-check-failure up=ignore, got {on_check_failure!r}"
+            assert "up" in layer["checks"], f"{service.name}: expected an `up` check for status reporting"
+
+
+class TestUpdateStatusGraceRestart:
+    """_on_update_status restarts a down service only past the startup grace."""
+
+    @staticmethod
+    def _secret_mock():
+        """Return a mock Juju secret with valid encryption key contents."""
+        secret = MagicMock()
+        secret.get_content.return_value = {"gms-key": "k1", "frontend-key": "k2"}
+        return secret
+
+    def _drive(self, charm_ctx, base_state, failures):
+        """Run update-status with every healthcheck service DOWN at ``failures``.
+
+        Returns the shared fake container so the caller can assert on restart().
+        """
+        layer = {"frozen": "layer"}
+        container = MagicMock()
+        container.can_connect.return_value = True
+        container.get_check.return_value = SimpleNamespace(status=svc.CheckStatus.DOWN, failures=failures)
+        # Live plan == expected layer so we reach the is_down path, not is_invalid.
+        container.get_plan.return_value.to_dict.return_value = layer
+
+        with charm_ctx(charm_ctx.on.update_status(), base_state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._secret_mock()):
+                _stub_connections(mgr.charm)
+                with (
+                    patch.object(mgr.charm.unit, "get_container", return_value=container),
+                    patch.object(svc.GMSService, "is_enabled", return_value=True),
+                    patch.object(svc.FrontendService, "is_enabled", return_value=True),
+                    patch("charm.get_pebble_layer", return_value=layer),
+                ):
+                    mgr.run()
+        return container
+
+    def test_restarts_when_down_past_grace(self, charm_ctx, base_state):
+        """A service down for >= the grace is restarted."""
+        container = self._drive(charm_ctx, base_state, literals.HEALTHCHECK_RESTART_GRACE_FAILURES)
+        assert container.restart.called
+
+    def test_no_restart_within_grace(self, charm_ctx, base_state):
+        """A service down for < the grace is left to recover on its own."""
+        container = self._drive(charm_ctx, base_state, literals.HEALTHCHECK_RESTART_GRACE_FAILURES - 1)
+        assert not container.restart.called
 
 
 class TestReconcileInitFailure:
