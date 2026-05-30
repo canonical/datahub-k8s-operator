@@ -742,11 +742,11 @@ class GMSService(AbstractService):
             return False
 
         container = context.charm.unit.get_container(cls.name)
-        gms_serving = cls._gms_is_serving(container)
+        is_fresh = cls._is_fresh_container(container)
         is_leader = context.charm.unit.is_leader()
 
-        if gms_serving:
-            logger.debug("GMS is already serving; skipping one-time backend bootstrap")
+        if not is_fresh:
+            logger.debug("GMS container already initialized; skipping one-time backend bootstrap")
         elif is_leader:
             # Step 1: PostgreSQL setup
             cls._run_postgresql_setup(context, container)
@@ -758,7 +758,7 @@ class GMSService(AbstractService):
         # Step 3: Truststore initialization (per-container, always runs)
         cls._run_truststore_init(context, container)
 
-        if not gms_serving and is_leader:
+        if is_fresh and is_leader:
             # Step 4: DataHub upgrade (SystemUpdate)
             cls._run_upgrade(context, container)
 
@@ -768,10 +768,7 @@ class GMSService(AbstractService):
     def _gms_is_serving(container) -> bool:
         """Return True when the GMS `up` health check is passing.
 
-        Used as a stateless precondition: a serving GMS implies the one-time
-        backend bootstrap (schema, indices, SystemUpdate) has already completed.
-        Returns False on a fresh container where the pebble plan, and therefore
-        the `up` check, does not exist yet.
+        Used by update-status to determine whether GMS is healthy right now.
 
         Args:
             container: The GMS container reference.
@@ -784,6 +781,27 @@ class GMSService(AbstractService):
         except Exception:  # noqa: BLE001 — check absent on fresh container
             return False
         return check.status == CheckStatus.UP
+
+    @staticmethod
+    def _is_fresh_container(container) -> bool:
+        """Return True when pebble has no plan yet (fresh or reset container).
+
+        A container that has been through initialization at least once will
+        have the `up` health-check registered in pebble even when GMS is
+        temporarily down. A container where the check is completely absent
+        has never been configured and will need the full backend bootstrap.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            Whether the container is fresh and needs backend initialization.
+        """
+        try:
+            container.get_check("up")
+            return False  # check registered, container already initialized
+        except Exception:  # noqa: BLE001
+            return True  # no plan at all, fresh container
 
     @classmethod
     def _run_postgresql_setup(cls, context: ServiceContext, container) -> None:
