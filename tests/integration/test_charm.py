@@ -85,6 +85,10 @@ def test_deploy_full(full_stack: jubilant.Juju):
     # missing the OpenSearch CA, this surfaces as PKIX errors in the GraphQL
     # response.
     logger.info("Verifying GMS can serve search queries (OpenSearch TLS path)")
+    session = requests.Session()
+    login_response = helpers.request_until(session, "POST", url, json=login_payload)
+    assert login_response.status_code == 200
+
     graphql_url = f"{base_url}/api/v2/graphql"
     query = {"query": ('{ searchAcrossEntities(input: {types: [DATASET], query: "*", count: 1})' " { total } }")}
 
@@ -92,26 +96,11 @@ def test_deploy_full(full_stack: jubilant.Juju):
     ssl_errors: list = []
     search_total = None
     body: dict = {}
-    last_status = None
-    for attempt in range(30):
-        sess = requests.Session()
-        login_resp = sess.post(url, json=login_payload, timeout=15)
-        if login_resp.status_code != 200:
-            logger.info("search re-login attempt %d -> %d", attempt, login_resp.status_code)
-            time.sleep(10)
-            continue
-        search_response = sess.post(graphql_url, json=query, timeout=15)
-        last_status = search_response.status_code
-        if search_response.status_code != 200:
-            logger.info(
-                "graphql attempt %d -> %d | login set-cookie=%s | body=%s",
-                attempt,
-                search_response.status_code,
-                login_resp.headers.get("Set-Cookie", "<none>"),
-                search_response.text[:300],
-            )
-            time.sleep(10)
-            continue
+    for _ in range(30):
+        search_response = helpers.request_until(session, "POST", graphql_url, json=query)
+        assert (
+            search_response.status_code == 200
+        ), f"GraphQL request returned {search_response.status_code}: {search_response.text[:500]}"
         body = search_response.json()
         errors = body.get("errors") or []
         search_total = body.get("data", {}).get("searchAcrossEntities", {}).get("total")
@@ -119,8 +108,6 @@ def test_deploy_full(full_stack: jubilant.Juju):
         if not errors and search_total is not None:
             break
         time.sleep(10)
-
-    assert last_status == 200, f"GraphQL never returned 200 (last status {last_status})"
 
     logger.info(
         "DATAHUB_GMS_SEARCH errors=%d ssl_errors=%d total_present=%s",

@@ -612,6 +612,11 @@ class GMSService(AbstractService):
 
         env = {
             "JAVA_HOME": literals.JAVA_HOME,
+            # GMS unconditionally wires an AWS STS client bean whose creation
+            # aborts the Spring context if no region resolves. We use no AWS
+            # (OpenSearch/Kafka use explicit creds), so this value is inert, it
+            # just stops GMS crashing on first boot (`Unable to load region`).
+            "AWS_REGION": "us-east-1",
             "THEME_V2_DEFAULT": "true",
             "DATAHUB_TELEMETRY_ENABLED": "false",
             "EBEAN_DATASOURCE_PORT": db_conn["port"],
