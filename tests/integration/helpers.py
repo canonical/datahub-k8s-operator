@@ -367,13 +367,14 @@ def request_until(
                 return response
             last_response = response
             logger.info(
-                "%s %s -> %d, want %d (attempt %d/%d)",
+                "%s %s -> %d, want %d (attempt %d/%d); body=%s",
                 method,
                 url,
                 response.status_code,
                 expected_status,
                 attempt,
                 attempts,
+                response.text[:300],
             )
         time.sleep(delay)
     if last_response is not None:
