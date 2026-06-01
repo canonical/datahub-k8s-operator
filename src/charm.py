@@ -514,6 +514,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 container.replan()
             except ops.pebble.ChangeError as e:
                 logger.warning("Pebble replan failed for '%s': %s", service.name, str(e))
+                self.unit.status = ops.MaintenanceStatus(f"replan failed for '{service.name}'")
                 return
 
         self._reconcile_trino_if_ready()

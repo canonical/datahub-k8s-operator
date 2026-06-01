@@ -21,7 +21,7 @@ K8S_CLOUD = "canonical-k8s"
 
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_hybrid_cloud():
+def setup_hybrid_cloud(request: FixtureRequest):
     """Ensure LXD and Canonical Kubernetes are cross-configured before any tests run."""
     logger.info("Bootstrapping hybrid cloud environment.")
 
@@ -42,8 +42,9 @@ def setup_hybrid_cloud():
     # Bootstrap LXD controller
     subprocess.run(["/snap/bin/juju", "bootstrap", "localhost", LXD_CONTROLLER], check=False)  # nosec B603
 
-    # Obtain the Canonical Kubernetes admin kubeconfig.
-    kubeconfig = os.path.expanduser("~/.kube/config")
+    # Obtain the Canonical Kubernetes admin kubeconfig. The path is supplied by
+    # operator-workflows via --kube-config; default to the conventional location.
+    kubeconfig = os.path.expanduser(request.config.getoption("--kube-config") or "~/.kube/config")
 
     # Register the canonical-k8s cluster as a cloud on the LXD controller.
     # `juju add-k8s` reads the cluster + credential from $KUBECONFIG.

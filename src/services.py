@@ -784,7 +784,7 @@ class GMSService(AbstractService):
         if db_conn is None:
             return False
 
-        query = "SELECT 1 FROM metadata_aspect_v2 WHERE urn LIKE 'urn:li:dataHubPolicy:%' LIMIT 1"
+        query = "SELECT 1 FROM metadata_aspect_v2 WHERE urn = 'urn:li:dataHubPolicy:0' LIMIT 1"
         environment = {"PGPASSWORD": db_conn["password"]}
         try:
             process = container.exec(
