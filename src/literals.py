@@ -9,7 +9,10 @@ PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
 FRONTEND_FALLBACK_URL = f"http://localhost:{FRONTEND_PORT}"
 GMS_PORT = 8080
-HEALTHCHECK_RESTART_GRACE_FAILURES = 60
+# Consecutive `up`-check failures before pebble restarts a workload. At the 10s
+# check period this is ~5 min, long enough that a slow-but-healthy JVM cold start
+# is not killed mid-boot, short enough to promptly rescue a genuinely hung start.
+HEALTHCHECK_FAILURE_THRESHOLD = 30
 
 INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
 ENCRYPTION_KEYS_SECRET_LABEL = "datahub-encryption-keys"  # nosec B105

@@ -69,19 +69,14 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
         svc_dict["environment"] = env
 
     if service.healthcheck is not None:
-        # GMS and FE take minutes to start, and a pebble restart check fires
-        # every ~30s during legitimate slow startup or a transient dependency
-        # blip, looping the cold JVM so it never recovers. The charm restarts
-        # only after a long grace (literals.HEALTHCHECK_RESTART_GRACE_FAILURES);
-        # a crashed process is still restarted by pebble's default behaviour.
-        svc_dict.update({"on-check-failure": {"up": "ignore"}})
+        svc_dict.update({"on-check-failure": {"up": "restart"}})
         layer.update(
             {
                 "checks": {
                     "up": {
                         "override": "replace",
                         "period": "10s",
-                        "threshold": 3,
+                        "threshold": literals.HEALTHCHECK_FAILURE_THRESHOLD,
                         "http": {
                             "url": f"http://localhost:{service.healthcheck['port']}{service.healthcheck['endpoint']}"
                         },
@@ -288,7 +283,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         is_down = False
         is_invalid = False
         is_not_ready = False
-        down_services: List[str] = []
         for service in SERVICES:
             if service.healthcheck is None:
                 continue
@@ -321,11 +315,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             if check.status != CheckStatus.UP:
                 logger.info("up check failed for '%s' (failures=%d)", service.name, check.failures)
                 is_down = True
-                # Only a service that has been continuously down past the
-                # startup grace is treated as needed to be restarted; a
-                # slow-starting or transiently-unhealthy one is left to recover.
-                if check.failures >= literals.HEALTHCHECK_RESTART_GRACE_FAILURES:
-                    down_services.append(service.name)
                 continue
             logger.debug("service '%s' is up", service.name)
 
@@ -336,12 +325,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
+            logger.info("services down, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
-            for name in down_services:
-                logger.info("'%s' down beyond startup grace; restarting", name)
-                container = self.unit.get_container(name)
-                if container.can_connect():
-                    container.restart(name)
         else:
             self.reconcile()
 
