@@ -1,4 +1,4 @@
-# Copyright 2026 Canonical Ltd.
+# Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
 variable "database_offer_url" {
