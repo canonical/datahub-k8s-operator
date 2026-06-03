@@ -12,6 +12,7 @@ import pytest
 from ops import testing
 
 import exceptions
+import literals
 import services as svc
 from charm import DatahubK8SOperatorCharm, get_pebble_layer
 
@@ -321,11 +322,8 @@ class TestCheckStateOIDC:
 class TestGetPebbleLayer:
     """Tests for the get_pebble_layer helper."""
 
-    def test_services_with_healthcheck_use_pebble_restart(self):
-        """Services that define a healthcheck must use on-check-failure: restart.
-
-        This ensures pebble can recover a live-but-stuck GMS or frontend.
-        """
+    def test_services_with_healthcheck_restart_on_a_long_threshold(self):
+        """Healthcheck services wire `up` to on-check-failure: restart."""
         context = MagicMock()
         for service in [svc.GMSService, svc.FrontendService]:
             with patch.object(service, "is_enabled", return_value=True):
@@ -336,6 +334,9 @@ class TestGetPebbleLayer:
             assert (
                 on_check_failure.get("up") == "restart"
             ), f"{service.name}: expected on-check-failure up=restart, got {on_check_failure!r}"
+            assert (
+                layer["checks"]["up"]["threshold"] == literals.HEALTHCHECK_FAILURE_THRESHOLD
+            ), f"{service.name}: expected the long restart threshold"
 
 
 class TestReconcileInitFailure:

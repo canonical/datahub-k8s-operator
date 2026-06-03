@@ -289,30 +289,44 @@ class TestFrontendRunInitialization:
         assert result is False
 
 
-class TestGMSServingGate:
-    """Tests for GMSService._gms_is_serving (the one-time-setup precondition)."""
+class TestBackendProvisionedGate:
+    """Tests for GMSService._backend_is_provisioned (the one-time-bootstrap gate)."""
 
-    def test_true_when_up_check_passing(self):
-        """Reports serving when the `up` pebble check is UP."""
-        check = SimpleNamespace(status=services.CheckStatus.UP)
-        container = SimpleNamespace(get_check=lambda name: check)
-        assert services.GMSService._gms_is_serving(container) is True
+    @staticmethod
+    def _container(stdout=None, raises=False):
+        """Return a fake GMS container whose psql exec yields ``stdout``."""
 
-    def test_false_when_up_check_down(self):
-        """Reports not-serving when the `up` check is not UP."""
-        check = SimpleNamespace(status=services.CheckStatus.DOWN)
-        container = SimpleNamespace(get_check=lambda name: check)
-        assert services.GMSService._gms_is_serving(container) is False
+        def _exec(*args, **kwargs):
+            """Simulate container.exec returning a process with the given stdout."""
+            if raises:
+                raise RuntimeError("psql unavailable")
+            return SimpleNamespace(wait_output=lambda: (stdout, ""))
 
-    def test_false_when_check_absent(self):
-        """Reports not-serving on a fresh container with no pebble plan / check."""
+        return SimpleNamespace(exec=_exec)
 
-        def _raise(name):
-            """Simulate get_check raising when the check doesn't exist."""
-            raise RuntimeError("no such check")
+    def test_true_when_policy_aspect_present(self):
+        """Provisioned when the query finds the root policy aspect."""
+        context = SimpleNamespace(charm=_make_charm(db=_db_conn()))
+        container = self._container(stdout="1\n")
+        assert services.GMSService._backend_is_provisioned(context, container) is True
 
-        container = SimpleNamespace(get_check=_raise)
-        assert services.GMSService._gms_is_serving(container) is False
+    def test_false_when_policy_aspect_absent(self):
+        """Not provisioned when the query returns no rows (fresh backend)."""
+        context = SimpleNamespace(charm=_make_charm(db=_db_conn()))
+        container = self._container(stdout="")
+        assert services.GMSService._backend_is_provisioned(context, container) is False
+
+    def test_false_when_no_db_connection(self):
+        """Not provisioned when the DB relation has no connection yet."""
+        context = SimpleNamespace(charm=_make_charm(db=None))
+        container = self._container(stdout="1\n")
+        assert services.GMSService._backend_is_provisioned(context, container) is False
+
+    def test_false_when_query_fails(self):
+        """A failed query is treated as not-provisioned so the bootstrap re-runs."""
+        context = SimpleNamespace(charm=_make_charm(db=_db_conn()))
+        container = self._container(raises=True)
+        assert services.GMSService._backend_is_provisioned(context, container) is False
 
 
 class TestGMSSetWorkloadVersion:

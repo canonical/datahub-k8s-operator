@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urlparse
 
 import yaml
-from ops.pebble import CheckStatus
 
 import exceptions
 import literals
@@ -720,11 +719,11 @@ class GMSService(AbstractService):
         3. Truststore initialization for Opensearch SSL
         4. DataHub upgrade (SystemUpdate job, also handles Kafka topic creation)
 
-        Statelessness note: steps 1, 2 and 4 are one-time backend bootstrap. They
-        only need to run while GMS is not yet serving. Once the `up` health check
-        passes, the schema, indices and SystemUpdate marker all exist, so we skip
-        them to avoid the JVM-heavy upgrade on every reconcile. They re-run
-        automatically on a fresh container (no pebble plan yet -> `up` check absent).
+        Statelessness note: steps 1, 2 and 4 are one-time backend bootstrap, gated
+        on `_backend_is_provisioned` — a query against the backend's own state (the
+        root auth policy in `metadata_aspect_v2`), not on workload liveness. This
+        runs the bootstrap on a fresh backend (so authenticated GraphQL works) and
+        skips the JVM-heavy upgrade on a rebuilt pod whose backends are intact.
         The truststore import (step 3) is exempt: it is cheap and must self-heal
         unconditionally.
 
@@ -742,53 +741,83 @@ class GMSService(AbstractService):
             return False
 
         container = context.charm.unit.get_container(cls.name)
-        gms_serving = cls._gms_is_serving(container)
+        is_leader = context.charm.unit.is_leader()
+        backend_provisioned = cls._backend_is_provisioned(context, container)
 
-        if gms_serving:
-            logger.debug("GMS is already serving; skipping one-time backend bootstrap")
-        else:
+        if backend_provisioned:
+            logger.debug("DataHub backend already provisioned; skipping one-time bootstrap")
+        elif is_leader:
             # Step 1: PostgreSQL setup
             cls._run_postgresql_setup(context, container)
             # Step 2: Opensearch index creation
             cls._run_opensearch_setup(context, container)
+        else:
+            logger.debug("Non-leader unit; leader handles backend bootstrap")
 
-        # Step 3: Truststore initialization
+        # Step 3: Truststore initialization (per-container, always runs)
         cls._run_truststore_init(context, container)
 
-        if not gms_serving:
+        if not backend_provisioned and is_leader:
             # Step 4: DataHub upgrade (SystemUpdate)
             cls._run_upgrade(context, container)
 
         return True
 
-    @staticmethod
-    def _gms_is_serving(container) -> bool:
-        """Return True when the GMS `up` health check is passing.
+    @classmethod
+    def _backend_is_provisioned(cls, context: ServiceContext, container) -> bool:
+        """Return True when the one-time DataHub backend bootstrap has completed.
 
-        Used as a stateless precondition: a serving GMS implies the one-time
-        backend bootstrap (schema, indices, SystemUpdate) has already completed.
-        Returns False on a fresh container where the pebble plan, and therefore
-        the `up` check, does not exist yet.
+        Gates the expensive, JVM-heavy ``SystemUpdate`` (and the postgres/opensearch
+        setup) on the *backend's own state* rather than on workload liveness. The
+        marker is the root authorization policy ``urn:li:dataHubPolicy:0``: it is
+        written into ``metadata_aspect_v2`` as a ``dataHubPolicyKey`` aspect by
+        SystemUpdate, and is what authorizes the admin user's GraphQL session.
 
         Args:
+            context: Context for the service.
             container: The GMS container reference.
 
         Returns:
-            Whether the GMS `up` check reports UP.
+            Whether the DataHub backend has been provisioned.
         """
-        try:
-            check = container.get_check("up")
-        except Exception:  # noqa: BLE001 — check absent on fresh container
+        db_conn = context.charm.db_relation.connection
+        if db_conn is None:
             return False
-        return check.status == CheckStatus.UP
+
+        query = "SELECT 1 FROM metadata_aspect_v2 WHERE urn = 'urn:li:dataHubPolicy:0' LIMIT 1"
+        environment = {"PGPASSWORD": db_conn["password"]}
+        try:
+            process = container.exec(
+                command=[
+                    "psql",
+                    "-h",
+                    db_conn["host"],
+                    "-p",
+                    db_conn["port"],
+                    "-U",
+                    db_conn["username"],
+                    "-d",
+                    db_conn["dbname"],
+                    "-tAc",
+                    query,
+                ],
+                timeout=60,
+                environment=environment,
+            )
+            stdout, _ = process.wait_output()
+        except Exception as e:  # noqa: BLE001
+            logger.info("Backend provisioning check failed, assuming not provisioned: %s", str(e))
+            return False
+
+        return stdout.strip() == "1"
 
     @classmethod
     def _run_postgresql_setup(cls, context: ServiceContext, container) -> None:
         """Run PostgreSQL setup against the related DB.
 
         Idempotent since the init script uses `CREATE TABLE IF NOT EXISTS` etc.
-        Gated by the caller on GMS-not-serving, so it runs on fresh containers
-        and self-heals on pod recreation rather than on every reconcile.
+        Gated by the caller on `_backend_is_provisioned`, so it runs against a
+        fresh backend and self-heals rather than running on every reconcile.
 
         Args:
             context: Context for the service.
@@ -826,8 +855,8 @@ class GMSService(AbstractService):
         """Run Opensearch index creation against the related cluster.
 
         Idempotent since `create-indices.sh` uses `PUT` with `IF NOT EXISTS`
-        semantics. Gated by the caller on GMS-not-serving, so it runs on fresh
-        containers and self-heals on pod recreation rather than every reconcile.
+        semantics. Gated by the caller on `_backend_is_provisioned`, so it runs
+        against a fresh backend and self-heals rather than every reconcile.
 
         Args:
             context: Context for the service.
@@ -910,9 +939,9 @@ class GMSService(AbstractService):
             InitializationFailedError: If the initialization fails.
         """
         # SystemUpdate is the JVM-heavy bootstrap. The caller gates it on
-        # GMS-not-serving so it runs once per container lifecycle (fresh pod)
-        # rather than on every reconcile. SystemUpdate is itself idempotent, so
-        # re-running on pod recreation is safe.
+        # `_backend_is_provisioned` so it runs against a fresh backend rather than
+        # on every reconcile. SystemUpdate is itself idempotent, so re-running on a
+        # not-yet-marked backend is safe.
         logger.info("Running datahub-upgrade job")
         environment = cls._compile_upgrade_environment(context)
         try:

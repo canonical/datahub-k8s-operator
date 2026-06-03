@@ -7,7 +7,6 @@ import logging
 import os
 import subprocess  # nosec B404
 import sys
-import tempfile
 from pathlib import Path
 from typing import Dict
 
@@ -17,10 +16,13 @@ from pytest import FixtureRequest
 
 logger = logging.getLogger(__name__)
 
+LXD_CONTROLLER = "localhost-localhost"
+K8S_CLOUD = "canonical-k8s"
+
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_hybrid_cloud():
-    """Ensure LXD and MicroK8s are cross-configured before any tests run."""
+def setup_hybrid_cloud(request: FixtureRequest):
+    """Ensure LXD and Canonical Kubernetes are cross-configured before any tests run."""
     logger.info("Bootstrapping hybrid cloud environment.")
 
     # Configure kernel parameters for OpenSearch.
@@ -38,42 +40,26 @@ def setup_hybrid_cloud():
     )  # nosec B603
 
     # Bootstrap LXD controller
-    subprocess.run(["/snap/bin/juju", "bootstrap", "localhost", "localhost-localhost"], check=False)  # nosec B603
+    subprocess.run(["/snap/bin/juju", "bootstrap", "localhost", LXD_CONTROLLER], check=False)  # nosec B603
 
-    # Tweak microk8s API address for LXD access
-    with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
-        subprocess.run(["/usr/bin/sudo", "microk8s.config"], stdout=f, check=True)  # nosec B603
-        client_config = f.name
-    subprocess.run(
-        ["/usr/bin/sudo", "cp", client_config, "/var/snap/microk8s/current/credentials/client.config"],
-        check=True,
-    )  # nosec B603
-    os.unlink(client_config)
+    # Obtain the Canonical Kubernetes admin kubeconfig. The path is supplied by
+    # operator-workflows via --kube-config; default to the conventional location.
+    kubeconfig = os.path.expanduser(request.config.getoption("--kube-config") or "~/.kube/config")
 
-    # Add microk8s cloud to the LXD controller
+    # Register the canonical-k8s cluster as a cloud on the LXD controller.
+    # `juju add-k8s` reads the cluster + credential from $KUBECONFIG.
     result = subprocess.run(
-        [
-            "/usr/bin/sudo",
-            "-g",
-            "snap_microk8s",
-            "-E",
-            "juju",
-            "add-cloud",
-            "microk8s",
-            "--controller",
-            "localhost-localhost",
-            "--credential",
-            "microk8s",
-        ],
+        ["/snap/bin/juju", "add-k8s", K8S_CLOUD, "--client", "--controller", LXD_CONTROLLER],
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, "KUBECONFIG": kubeconfig},
     )  # nosec B603
     if result.returncode != 0:
         if "already exists" in result.stderr or "already exists" in result.stdout:
-            logger.info("MicroK8s cloud already configured")
+            logger.info("Canonical Kubernetes cloud already configured")
         else:
-            raise RuntimeError(f"Failed to add microk8s cloud.\nStdout: {result.stdout}\nStderr: {result.stderr}")
+            raise RuntimeError(f"Failed to add canonical-k8s cloud.\nStdout: {result.stdout}\nStderr: {result.stderr}")
 
 
 def _collect_juju_logs_if_failed(request: FixtureRequest, juju: jubilant.Juju) -> None:
@@ -135,26 +121,24 @@ def rock_resources(request: FixtureRequest) -> Dict[str, str]:
 
 @pytest.fixture(scope="function")
 def solo_juju(request: FixtureRequest) -> jubilant.Juju:
-    """Create a temporary K8s model for isolated deploy-only test."""
-    with jubilant.temp_model(cloud="microk8s") as juju:
+    """Create a temporary K8s model for isolated deploy-only test.
+
+    Storage uses the cluster default StorageClass (Canonical k8s `local-storage`).
+    """
+    with jubilant.temp_model(cloud=K8S_CLOUD) as juju:
         juju.wait_timeout = 30 * 60
-        try:
-            juju.model_config({"workload-storage": "microk8s-hostpath"})
-        except jubilant.CLIError as exc:
-            logger.warning("Could not set workload-storage on '%s': %s", juju.model, exc)
         yield juju
         _collect_juju_logs_if_failed(request, juju)
 
 
 @pytest.fixture(scope="module")
 def k8s_juju(request: FixtureRequest) -> jubilant.Juju:
-    """Create a temporary K8s model used by full deployment tests."""
-    with jubilant.temp_model(cloud="microk8s") as juju:
+    """Create a temporary K8s model used by full deployment tests.
+
+    Storage uses the cluster default StorageClass (Canonical k8s `local-storage`).
+    """
+    with jubilant.temp_model(cloud=K8S_CLOUD) as juju:
         juju.wait_timeout = 30 * 60
-        try:
-            juju.model_config({"workload-storage": "microk8s-hostpath"})
-        except jubilant.CLIError as exc:
-            logger.warning("Could not set workload-storage on '%s': %s", juju.model, exc)
         yield juju
         _collect_juju_logs_if_failed(request, juju)
 

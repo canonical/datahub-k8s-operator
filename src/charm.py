@@ -76,7 +76,7 @@ def get_pebble_layer(service: services.AbstractService, context: services.Servic
                     "up": {
                         "override": "replace",
                         "period": "10s",
-                        "threshold": 3,
+                        "threshold": literals.HEALTHCHECK_FAILURE_THRESHOLD,
                         "http": {
                             "url": f"http://localhost:{service.healthcheck['port']}{service.healthcheck['endpoint']}"
                         },
@@ -313,7 +313,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                     is_invalid = True
                     break  # guaranteed replan, exit loop
             if check.status != CheckStatus.UP:
-                logger.info("up check failed for '%s'", service.name)
+                logger.info("up check failed for '%s' (failures=%d)", service.name, check.failures)
                 is_down = True
                 continue
             logger.debug("service '%s' is up", service.name)
@@ -470,7 +470,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         self.reconcile()
 
-    def reconcile(self):
+    def reconcile(self):  # noqa: C901
         """Reconcile the charm to its desired state.
 
         Single entry point for every observer. Reads current config + relation
@@ -510,7 +510,12 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
             pebble_layer = get_pebble_layer(service, context)
             container.add_layer(service.name, pebble_layer, combine=True)
-            container.replan()
+            try:
+                container.replan()
+            except ops.pebble.ChangeError as e:
+                logger.warning("Pebble replan failed for '%s': %s", service.name, str(e))
+                self.unit.status = ops.MaintenanceStatus(f"replan failed for '{service.name}'")
+                return
 
         self._reconcile_trino_if_ready()
 
