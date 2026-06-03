@@ -16,19 +16,19 @@ provider "juju" {}
 variable "k8s_cloud_name" {
   description = "Name of the Kubernetes cloud registered on the controller."
   type        = string
-  default     = "microk8s"
+  default     = "tfk8s"
 }
 
 variable "k8s_credential_name" {
   description = "Name of the credential for the Kubernetes cloud."
   type        = string
-  default     = "microk8s"
+  default     = "tfk8s"
 }
 
 variable "workload_storage_class" {
   description = "StorageClass to use for workloads in the Kubernetes model."
   type        = string
-  default     = "microk8s-hostpath"
+  default     = "tfk8s-hostpath"
 }
 
 resource "juju_model" "test_model" {
