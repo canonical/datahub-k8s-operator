@@ -9,3 +9,10 @@ __pycache__/
 .idea
 .vscode/
 .mypy_cache/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan

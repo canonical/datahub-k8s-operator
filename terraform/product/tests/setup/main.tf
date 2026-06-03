@@ -1,0 +1,40 @@
+# Copyright 2026 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+terraform {
+  required_version = "~> 1.12"
+  required_providers {
+    juju = {
+      version = "~> 1.0"
+      source  = "juju/juju"
+    }
+  }
+}
+
+provider "juju" {}
+
+resource "juju_model" "machine" {
+  name = "tf-testing-deps-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+}
+
+resource "juju_model" "k8s" {
+  name = "tf-testing-dh-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+
+  cloud {
+    name = var.k8s_cloud_name
+  }
+}
+
+variable "k8s_cloud_name" {
+  description = "Name of the Kubernetes cloud registered on the controller."
+  type        = string
+  default     = "microk8s"
+}
+
+output "machine_model_uuid" {
+  value = juju_model.machine.uuid
+}
+
+output "k8s_model_uuid" {
+  value = juju_model.k8s.uuid
+}
