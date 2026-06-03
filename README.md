@@ -133,12 +133,7 @@ The repository ships two Terraform modules:
   from your own Terraform solutions.
 - [`terraform/product`](terraform/product) — a **product module** that deploys the full modernized
   stack (PostgreSQL, Kafka + ZooKeeper, OpenSearch, two Traefik ingresses with TLS), creates and
-  grants the encryption-keys and optional OIDC secrets, and wires everything together. It supports
-  both a single-controller (LXD + K8s cloud) deployment and the two-controller split via
-  external offer-URL inputs. See its [README](terraform/product/README.md) for the topology notes.
-
-The Terraform modules have their own release lifecycle, tagged independently of charm revisions as
-`tf-X.Y.Z`.
+  grants the encryption-keys and optional OIDC secrets, and wires everything together.
 
 ### Configuring Model Proxies
 
