@@ -24,10 +24,6 @@ resource "juju_model" "k8s" {
   cloud {
     name = var.k8s_cloud_name
   }
-
-  config = {
-    workload-storage = var.workload_storage_class
-  }
 }
 
 variable "k8s_cloud_name" {
@@ -40,12 +36,6 @@ variable "k8s_credential_name" {
   description = "Name of the credential for the Kubernetes cloud."
   type        = string
   default     = "tfk8s"
-}
-
-variable "workload_storage_class" {
-  description = "StorageClass to use for workloads in the Kubernetes model."
-  type        = string
-  default     = "tfk8s-hostpath"
 }
 
 output "machine_model_uuid" {
