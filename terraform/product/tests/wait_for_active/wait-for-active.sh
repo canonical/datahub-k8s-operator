@@ -1,36 +1,36 @@
 #!/bin/bash
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+#
+# Polls `juju status` until APP_NAME's application status is "active" (or "error", or until TIMEOUT
+# seconds elapse), then prints {"status": "<status>"} for the Terraform external data source.
 
 MODEL_UUID=$1
 APP_NAME=$2
 TIMEOUT=$3
 
 export APP_NAME
-
 LOG="/tmp/wait-for-active.$$.log"
 
 if [ -z "$MODEL_UUID" ] || [ -z "$APP_NAME" ] || [ -z "$TIMEOUT" ]; then
-	echo "Usage: $0 <model_uuid|model_name> <app_name> <timeout in seconds>"
-	echo "[$(date)] missing arguments" >>"$LOG"
-	exit 1
+	echo '{"status": "bad_arguments"}'
+	exit 0
 fi
 
-if ! juju show-model "$MODEL_UUID" &>/dev/null; then
-	echo '{"status": "model_not_found"}'
-	echo "[$(date)] model not found: $MODEL_UUID" >>"$LOG"
-	exit
-fi
+current_status() {
+	juju status "$APP_NAME" --model "$MODEL_UUID" --format=json 2>>"$LOG" |
+		jq -r '.applications[env.APP_NAME]["application-status"].current // "unknown"'
+}
 
-if ! juju show-application "$APP_NAME" --model "$MODEL_UUID" &>/dev/null; then
-	echo '{"status": "app_not_found"}'
-	echo "[$(date)] app not found: $APP_NAME" >>"$LOG"
-	exit
-fi
+deadline=$(($(date +%s) + TIMEOUT))
+status="unknown"
+while [ "$(date +%s)" -lt "$deadline" ]; do
+	status=$(current_status)
+	echo "[$(date)] $APP_NAME: $status" >>"$LOG"
+	case "$status" in
+	active | error) break ;;
+	esac
+	sleep 20
+done
 
-echo "[$(date)] waiting for $APP_NAME in $MODEL_UUID to be active" >>"$LOG"
-
-juju wait-for application "$APP_NAME" --timeout="${TIMEOUT}s" --model "$MODEL_UUID" &>>"$LOG"
-STATUS=$(juju status "$APP_NAME" --model "$MODEL_UUID" --format=json | jq -r '.applications[env.APP_NAME]["application-status"].current')
-
-echo '{"status": "'"$STATUS"'"}'
+echo '{"status": "'"$status"'"}'
