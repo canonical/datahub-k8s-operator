@@ -18,4 +18,5 @@ jobs:
     secrets: inherit
     with:
       lxd-controller-with-k8s-cloud: true
+      additional-setup-script: "./tests/setup/pre_run_script.sh"
       terraform-directories: '["terraform/product"]'

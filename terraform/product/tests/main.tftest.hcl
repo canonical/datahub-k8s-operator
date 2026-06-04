@@ -23,3 +23,39 @@ run "full_deploy" {
     error_message = "data-platform offer URLs were not produced"
   }
 }
+
+# OpenSearch is the long wait on the machine cloud; it only reaches active with the kernel sysctls
+# set by tests/setup/pre_run_script.sh (wired via the workflow's additional-setup-script).
+run "wait_for_opensearch_active" {
+  module {
+    source = "./tests/wait_for_active"
+  }
+
+  variables {
+    model_uuid = run.setup_tests.machine_model_uuid
+    app_name   = "opensearch"
+    timeout    = 1200
+  }
+
+  assert {
+    condition     = data.external.app_status.result.status == "active"
+    error_message = "opensearch did not reach active state"
+  }
+}
+
+run "wait_for_datahub_active" {
+  module {
+    source = "./tests/wait_for_active"
+  }
+
+  variables {
+    model_uuid = run.setup_tests.k8s_model_uuid
+    app_name   = "datahub-k8s"
+    timeout    = 1800
+  }
+
+  assert {
+    condition     = data.external.app_status.result.status == "active"
+    error_message = "datahub-k8s did not reach active state"
+  }
+}
