@@ -9,13 +9,14 @@ variable "model_uuid" {
 variable "kafka" {
   description = "Configuration for the Kafka charm."
   type = object({
-    app_name    = optional(string, "kafka")
-    channel     = optional(string, "3/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 1)
+    app_name           = optional(string, "kafka")
+    channel            = optional(string, "3/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
   })
   default = {}
 }
@@ -23,13 +24,14 @@ variable "kafka" {
 variable "opensearch" {
   description = "Configuration for the OpenSearch charm."
   type = object({
-    app_name    = optional(string, "opensearch")
-    channel     = optional(string, "2/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 2)
+    app_name           = optional(string, "opensearch")
+    channel            = optional(string, "2/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 2)
   })
   default = {}
 }
@@ -37,13 +39,14 @@ variable "opensearch" {
 variable "postgresql" {
   description = "Configuration for the PostgreSQL charm."
   type = object({
-    app_name    = optional(string, "postgresql")
-    channel     = optional(string, "14/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 1)
+    app_name           = optional(string, "postgresql")
+    channel            = optional(string, "14/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
   })
   default = {}
 }
@@ -65,13 +68,14 @@ variable "self_signed_certificates" {
 variable "zookeeper" {
   description = "Configuration for the ZooKeeper charm (backend for Kafka)."
   type = object({
-    app_name    = optional(string, "zookeeper")
-    channel     = optional(string, "3/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 1)
+    app_name           = optional(string, "zookeeper")
+    channel            = optional(string, "3/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
   })
   default = {}
 }

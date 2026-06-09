@@ -4,11 +4,12 @@
 ### APPLICATIONS
 
 resource "juju_application" "postgresql" {
-  name        = var.postgresql.app_name
-  model_uuid  = var.model_uuid
-  units       = var.postgresql.units
-  constraints = var.postgresql.constraints
-  config      = var.postgresql.config
+  name               = var.postgresql.app_name
+  model_uuid         = var.model_uuid
+  units              = var.postgresql.units
+  constraints        = var.postgresql.constraints
+  config             = var.postgresql.config
+  storage_directives = var.postgresql.storage_directives
 
   charm {
     name     = "postgresql"
@@ -19,11 +20,12 @@ resource "juju_application" "postgresql" {
 }
 
 resource "juju_application" "kafka" {
-  name        = var.kafka.app_name
-  model_uuid  = var.model_uuid
-  units       = var.kafka.units
-  constraints = var.kafka.constraints
-  config      = var.kafka.config
+  name               = var.kafka.app_name
+  model_uuid         = var.model_uuid
+  units              = var.kafka.units
+  constraints        = var.kafka.constraints
+  config             = var.kafka.config
+  storage_directives = var.kafka.storage_directives
 
   charm {
     name     = "kafka"
@@ -38,11 +40,12 @@ resource "juju_application" "kafka" {
 }
 
 resource "juju_application" "zookeeper" {
-  name        = var.zookeeper.app_name
-  model_uuid  = var.model_uuid
-  units       = var.zookeeper.units
-  constraints = var.zookeeper.constraints
-  config      = var.zookeeper.config
+  name               = var.zookeeper.app_name
+  model_uuid         = var.model_uuid
+  units              = var.zookeeper.units
+  constraints        = var.zookeeper.constraints
+  config             = var.zookeeper.config
+  storage_directives = var.zookeeper.storage_directives
 
   charm {
     name     = "zookeeper"
@@ -53,11 +56,12 @@ resource "juju_application" "zookeeper" {
 }
 
 resource "juju_application" "opensearch" {
-  name        = var.opensearch.app_name
-  model_uuid  = var.model_uuid
-  units       = var.opensearch.units
-  constraints = var.opensearch.constraints
-  config      = var.opensearch.config
+  name               = var.opensearch.app_name
+  model_uuid         = var.model_uuid
+  units              = var.opensearch.units
+  constraints        = var.opensearch.constraints
+  config             = var.opensearch.config
+  storage_directives = var.opensearch.storage_directives
 
   charm {
     name     = "opensearch"

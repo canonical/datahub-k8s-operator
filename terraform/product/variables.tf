@@ -55,13 +55,14 @@ variable "k8s_model_uuid" {
 variable "kafka" {
   description = "Configuration for the in-module Kafka charm (used when kafka_offer_url is empty)."
   type = object({
-    app_name    = optional(string, "kafka")
-    channel     = optional(string, "3/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 1)
+    app_name           = optional(string, "kafka")
+    channel            = optional(string, "3/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
   })
   default = {}
 }
@@ -96,13 +97,14 @@ variable "oidc" {
 variable "opensearch" {
   description = "Configuration for the in-module OpenSearch charm (used when opensearch_offer_url is empty)."
   type = object({
-    app_name    = optional(string, "opensearch")
-    channel     = optional(string, "2/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 2)
+    app_name           = optional(string, "opensearch")
+    channel            = optional(string, "2/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 2)
   })
   default = {}
 }
@@ -116,13 +118,14 @@ variable "opensearch_offer_url" {
 variable "postgresql" {
   description = "Configuration for the in-module PostgreSQL charm (used when database_offer_url is empty)."
   type = object({
-    app_name    = optional(string, "postgresql")
-    channel     = optional(string, "14/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 1)
+    app_name           = optional(string, "postgresql")
+    channel            = optional(string, "14/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
   })
   default = {}
 }
@@ -168,13 +171,14 @@ variable "traefik_gms" {
 variable "zookeeper" {
   description = "Configuration for the in-module ZooKeeper charm (backend for Kafka; used when kafka_offer_url is empty)."
   type = object({
-    app_name    = optional(string, "zookeeper")
-    channel     = optional(string, "3/stable")
-    revision    = optional(number)
-    base        = optional(string, "ubuntu@22.04")
-    constraints = optional(string, "arch=amd64")
-    config      = optional(map(string), {})
-    units       = optional(number, 1)
+    app_name           = optional(string, "zookeeper")
+    channel            = optional(string, "3/stable")
+    revision           = optional(number)
+    base               = optional(string, "ubuntu@22.04")
+    constraints        = optional(string, "arch=amd64")
+    config             = optional(map(string), {})
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
   })
   default = {}
 }
