@@ -18,4 +18,4 @@ jobs:
       resource-mapping: '{"datahub-actions": "datahub-actions", "datahub-frontend": "datahub-frontend", "datahub-gms": "datahub-gms"}'
     secrets: inherit
     permissions:
-      contents: read
+      contents: write

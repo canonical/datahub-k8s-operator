@@ -26,4 +26,4 @@ jobs:
       doc-automation-disabled: true
     secrets: inherit
     permissions:
-      contents: read
+      contents: write
