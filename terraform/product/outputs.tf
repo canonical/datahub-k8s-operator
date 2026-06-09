@@ -17,14 +17,14 @@ output "models" {
       model_uuid = var.k8s_model_uuid
       components = {
         datahub-k8s              = module.datahub.app_name
-        traefik-frontend         = juju_application.traefik_frontend.name
-        traefik-gms              = juju_application.traefik_gms.name
-        self-signed-certificates = juju_application.self_signed_certificates.name
+        traefik-frontend         = module.traefik_frontend.application.name
+        traefik-gms              = module.traefik_gms.application.name
+        self-signed-certificates = module.self_signed_certificates.application.name
       }
     }
     data-platform = {
       model_uuid = local.deploy_deps ? var.machine_model_uuid : null
-      components = local.deploy_deps ? module.dependencies[0].app_names : {}
+      components = local.deploy_deps ? module.dependencies[0].components : {}
     }
   }
 }

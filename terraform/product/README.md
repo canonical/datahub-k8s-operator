@@ -44,9 +44,15 @@ The module creates and grants the two Juju secrets DataHub reads:
 
 ## Module structure
 
-- **main.tf** - data platform module, DataHub module, secrets, ingress, TLS, integrations, metadata.
+This product module is composed entirely of **charm modules** and a **component module**.
+
+- **main.tf** - composes the data-platform component, the DataHub charm module, the ingress
+  (traefik) and TLS (self-signed-certificates) charm modules; creates the secrets and all integrations.
 - **variables.tf** - model UUIDs, per-charm configuration objects, offer-URL toggles, secret inputs.
 - **outputs.tf** - `models`, `metadata`, `offers`.
 - **locals.tf** - deploy/offer resolution and DataHub config assembly.
 - **terraform.tf** - Terraform and provider version constraints.
-- **modules/dependencies** - the machine-model data platform (also usable standalone).
+- **modules/{postgresql,kafka,zookeeper,opensearch,self-signed-certificates,traefik-k8s}** - local
+  **charm modules**: swap each `source` to the official upstream charm module once it is published.
+- **modules/dependencies** - the data-platform **component module**: composes the data-platform
+  charm modules above, wires their integrations, and exposes the cross-model offers.

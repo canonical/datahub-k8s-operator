@@ -77,47 +77,43 @@ resource "juju_access_secret" "oidc" {
   secret_id    = juju_secret.oidc[0].secret_id
 }
 
-### INGRESS (K8s model)
+### INGRESS + TLS (K8s model)
 
-resource "juju_application" "traefik_frontend" {
-  name       = var.traefik_frontend.app_name
+module "traefik_frontend" {
+  source = "./modules/traefik-k8s"
+
   model_uuid = var.k8s_model_uuid
-  trust      = true
-  units      = var.traefik_frontend.units
+  app_name   = var.traefik_frontend.app_name
+  channel    = var.traefik_frontend.channel
+  revision   = var.traefik_frontend.revision
   config     = var.traefik_frontend.config
-
-  charm {
-    name     = "traefik-k8s"
-    channel  = var.traefik_frontend.channel
-    revision = var.traefik_frontend.revision
-  }
-}
-
-resource "juju_application" "traefik_gms" {
-  name       = var.traefik_gms.app_name
-  model_uuid = var.k8s_model_uuid
+  units      = var.traefik_frontend.units
   trust      = true
-  units      = var.traefik_gms.units
-  config     = var.traefik_gms.config
-
-  charm {
-    name     = "traefik-k8s"
-    channel  = var.traefik_gms.channel
-    revision = var.traefik_gms.revision
-  }
 }
 
-resource "juju_application" "self_signed_certificates" {
-  name       = var.self_signed_certificates.app_name
-  model_uuid = var.k8s_model_uuid
-  units      = var.self_signed_certificates.units
-  config     = var.self_signed_certificates.config
+module "traefik_gms" {
+  source = "./modules/traefik-k8s"
 
-  charm {
-    name     = "self-signed-certificates"
-    channel  = var.self_signed_certificates.channel
-    revision = var.self_signed_certificates.revision
-  }
+  model_uuid = var.k8s_model_uuid
+  app_name   = var.traefik_gms.app_name
+  channel    = var.traefik_gms.channel
+  revision   = var.traefik_gms.revision
+  config     = var.traefik_gms.config
+  units      = var.traefik_gms.units
+  trust      = true
+}
+
+module "self_signed_certificates" {
+  source = "./modules/self-signed-certificates"
+
+  model_uuid  = var.k8s_model_uuid
+  app_name    = var.self_signed_certificates.app_name
+  channel     = var.self_signed_certificates.channel
+  revision    = var.self_signed_certificates.revision
+  base        = var.self_signed_certificates.base
+  constraints = var.self_signed_certificates.constraints
+  config      = var.self_signed_certificates.config
+  units       = var.self_signed_certificates.units
 }
 
 ### INTEGRATIONS: DataHub to the data platform (cross-model, via offers)
@@ -172,8 +168,8 @@ resource "juju_integration" "datahub_frontend_ingress" {
   }
 
   application {
-    name     = juju_application.traefik_frontend.name
-    endpoint = "ingress"
+    name     = module.traefik_frontend.provides.ingress.name
+    endpoint = module.traefik_frontend.provides.ingress.endpoint
   }
 }
 
@@ -186,8 +182,8 @@ resource "juju_integration" "datahub_gms_ingress" {
   }
 
   application {
-    name     = juju_application.traefik_gms.name
-    endpoint = "ingress"
+    name     = module.traefik_gms.provides.ingress.name
+    endpoint = module.traefik_gms.provides.ingress.endpoint
   }
 }
 
@@ -195,13 +191,13 @@ resource "juju_integration" "traefik_frontend_certificates" {
   model_uuid = var.k8s_model_uuid
 
   application {
-    name     = juju_application.traefik_frontend.name
-    endpoint = "certificates"
+    name     = module.traefik_frontend.requires.certificates.name
+    endpoint = module.traefik_frontend.requires.certificates.endpoint
   }
 
   application {
-    name     = juju_application.self_signed_certificates.name
-    endpoint = "certificates"
+    name     = module.self_signed_certificates.provides.certificates.name
+    endpoint = module.self_signed_certificates.provides.certificates.endpoint
   }
 }
 
@@ -209,13 +205,13 @@ resource "juju_integration" "traefik_gms_certificates" {
   model_uuid = var.k8s_model_uuid
 
   application {
-    name     = juju_application.traefik_gms.name
-    endpoint = "certificates"
+    name     = module.traefik_gms.requires.certificates.name
+    endpoint = module.traefik_gms.requires.certificates.endpoint
   }
 
   application {
-    name     = juju_application.self_signed_certificates.name
-    endpoint = "certificates"
+    name     = module.self_signed_certificates.provides.certificates.name
+    endpoint = module.self_signed_certificates.provides.certificates.endpoint
   }
 }
 
