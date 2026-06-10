@@ -21,8 +21,14 @@ variable "channel" {
 
 variable "config" {
   description = "Application configuration. Options at https://charmhub.io/datahub-k8s/configurations."
-  type        = map(string)
-  default     = {}
+  type = object({
+    encryption-keys-secret-id    = optional(string)
+    kafka-topic-prefix           = optional(string)
+    opensearch-index-prefix      = optional(string)
+    use-play-cache-session-store = optional(string)
+    trino-patterns               = optional(string)
+  })
+  default = {}
 }
 
 variable "constraints" {

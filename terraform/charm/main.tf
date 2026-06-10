@@ -12,7 +12,7 @@ resource "juju_application" "datahub_k8s" {
     base     = var.base
   }
 
-  config      = var.config
+  config      = { for k, v in var.config : k => v if v != null }
   constraints = var.constraints
   resources   = var.resources
   units       = var.units
