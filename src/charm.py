@@ -26,6 +26,7 @@ import services
 import utils
 from log import log_event_handler
 from relations.kafka import KafkaRelation
+from relations.oauth import OauthRelation
 from relations.opensearch import OpenSearchRelation
 from relations.postgresql import PostgresqlRelation
 from relations.trino import TrinoRelation
@@ -142,6 +143,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Trino
         self.trino_relation = TrinoRelation(self)
 
+        # OAuth (SSO via the Canonical Identity Platform or an external IdP integrator)
+        self.oauth_relation = OauthRelation(self)
+
         # Ingress. `strip_prefix=True` so Traefik strips the per-app path
         # prefix before forwarding, the frontend SPA and GMS REST endpoints
         # both expect to live at the root of their respective backend.
@@ -253,8 +257,11 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Worst case of a false positive is a redundant reconcile which is no issue.
         id_match = encryption_keys_secret_id and event.secret.id.endswith(encryption_keys_secret_id)
         label_match = event.secret.label == literals.ENCRYPTION_KEYS_SECRET_LABEL
+        # The oauth client secret is provider-owned and cannot be matched by label,
+        # so reconcile whenever an oauth relation exists to cover secret rotation.
+        oauth_match = self.oauth_relation.is_related
 
-        if id_match or label_match:
+        if id_match or label_match or oauth_match:
             self.reconcile()
 
     @log_event_handler(logger)
@@ -401,7 +408,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         if not isinstance(parsed, dict):
             raise exceptions.UnreadyStateError("invalid 'trino-patterns' config: must be a JSON object")
 
-        if self.config.oidc_secret_id:
+        if self.oauth_relation.is_related:
             self._check_oidc_requires_https()
 
     def _check_oidc_requires_https(self):
@@ -479,6 +486,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         try:
             self._check_state()
+            # Publish the OAuth client config after the state check has
+            # guaranteed an HTTPS ingress URL for the redirect URI.
+            self.oauth_relation.publish_client_config()
         except (exceptions.UnreadyStateError, exceptions.ImproperSecretError) as err:
             self.unit.status = ops.BlockedStatus(str(err))
             return
