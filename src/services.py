@@ -619,9 +619,7 @@ class GMSService(AbstractService):
             "BACKFILL_BROWSE_PATHS_V2": "true",
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
-            # MCE consumer is deprecated since DataHub 0.9.x+.
-            # All ingestion uses the MCP/MCL path (rest sink), so it is not needed.
-            "MCE_CONSUMER_ENABLED": "false",
+            "MCE_CONSUMER_ENABLED": "true", # still needed for the ingestion scheduler
             "MAE_CONSUMER_ENABLED": "true",
             "PE_CONSUMER_ENABLED": "true",
             "ENTITY_REGISTRY_CONFIG_PATH": "/datahub/datahub-gms/resources/entity-registry.yml",

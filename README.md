@@ -125,6 +125,16 @@ client-secret: <client-secret-value>
 13. Proceed with the relations.
 14. If your deployment is behind an HTTP proxy, configure model proxies as described in [Configuring Model Proxies](#configuring-model-proxies).
 
+### Deploying with Terraform
+
+The repository ships two Terraform modules:
+
+- [`terraform/charm`](terraform/charm) — a **charm module** for `datahub-k8s` alone, to consume
+  from your own Terraform solutions.
+- [`terraform/product`](terraform/product) — a **product module** that deploys the full modernized
+  stack (PostgreSQL, Kafka + ZooKeeper, OpenSearch, two Traefik ingresses with TLS), creates and
+  grants the encryption-keys and optional OIDC secrets, and wires everything together.
+
 ### Configuring Model Proxies
 
 If your model runs in a restricted network, configure Juju model proxies so DataHub
