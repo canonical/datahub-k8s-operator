@@ -50,6 +50,7 @@ def _make_charm(
     config=None,
     model=None,
     frontend_ingress=None,
+    oauth_provider=None,
     unit=None,
     ensure_password=None,
 ):
@@ -61,6 +62,7 @@ def _make_charm(
         config=config or SimpleNamespace(),
         model=model or SimpleNamespace(),
         frontend_ingress=frontend_ingress or SimpleNamespace(is_ready=lambda: False, url=None),
+        oauth_relation=SimpleNamespace(provider_info=oauth_provider),
         unit=unit or SimpleNamespace(),
         system_client_id=literals.SYSTEM_CLIENT_ID,
         system_client_secret="my-secret",  # nosec B106
@@ -188,7 +190,6 @@ def test_frontend_compile_environment_includes_system_client():
         opensearch_index_prefix="",
         kafka_topic_prefix="",
         use_play_cache_session_store=False,
-        oidc_secret_id=None,
     )
     charm = _make_charm(
         kafka=_kafka_conn(),
@@ -207,22 +208,22 @@ def test_frontend_compile_environment_includes_system_client():
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
 
 
-def _frontend_oidc_env(*, ingress_ready, ingress_url):
-    """Build env from FrontendService with a stub ingress and OIDC secret configured."""
+def _oauth_provider(issuer_url="https://idp.example"):
+    """Return a stub of the oauth provider info delivered over the relation."""
+    return SimpleNamespace(issuer_url=issuer_url, client_id="cid", client_secret="csec")  # nosec B106
+
+
+def _frontend_oidc_env(*, ingress_ready, ingress_url, oauth_provider="default"):
+    """Build env from FrontendService with a stub ingress and oauth provider info."""
     enc_secret = SimpleNamespace(
         get_content=lambda refresh=False: {"gms-key": "k1", "frontend-key": "k2"},
     )
-    oidc_secret = SimpleNamespace(
-        get_content=lambda refresh=False: {"client-id": "cid", "client-secret": "csec"},
-    )
-    secrets_by_id = {"enc-id": enc_secret, "oidc-id": oidc_secret}
-    model = SimpleNamespace(get_secret=lambda id: secrets_by_id[id])
+    model = SimpleNamespace(get_secret=lambda id: enc_secret)
     config = SimpleNamespace(
         encryption_keys_secret_id="enc-id",  # nosec B106
         opensearch_index_prefix="",
         kafka_topic_prefix="",
         use_play_cache_session_store=False,
-        oidc_secret_id="oidc-id",  # nosec B106
     )
     charm = _make_charm(
         kafka=_kafka_conn(),
@@ -230,6 +231,7 @@ def _frontend_oidc_env(*, ingress_ready, ingress_url):
         config=config,
         model=model,
         frontend_ingress=SimpleNamespace(is_ready=lambda: ingress_ready, url=ingress_url),
+        oauth_provider=_oauth_provider() if oauth_provider == "default" else oauth_provider,
     )
     context = services.ServiceContext(charm=charm)
     with patch.object(services.FrontendService, "is_enabled", return_value=True):
@@ -247,6 +249,39 @@ def test_frontend_oidc_base_url_falls_back_when_ingress_not_ready():
     """OIDC base URL falls back to FRONTEND_FALLBACK_URL when the ingress relation is not ready."""
     env = _frontend_oidc_env(ingress_ready=False, ingress_url=None)
     assert env["AUTH_OIDC_BASE_URL"] == literals.FRONTEND_FALLBACK_URL
+
+
+def test_frontend_oidc_base_url_strips_trailing_slash():
+    """A root-serving ingress URL ('https://host/') is normalized (no trailing slash)."""
+    env = _frontend_oidc_env(ingress_ready=True, ingress_url="https://datahub.example/")
+    assert env["AUTH_OIDC_BASE_URL"] == "https://datahub.example"
+
+
+def test_frontend_oidc_env_from_provider_info():
+    """OIDC env derives discovery URI and credentials from the oauth provider info."""
+    env = _frontend_oidc_env(ingress_ready=True, ingress_url="https://traefik.example/datahub")
+    assert env["AUTH_OIDC_ENABLED"] == "true"
+    assert env["AUTH_OIDC_DISCOVERY_URI"] == "https://idp.example/.well-known/openid-configuration"
+    assert env["AUTH_OIDC_SCOPE"] == literals.OAUTH_SCOPE
+    assert env["AUTH_OIDC_CLIENT_ID"] == "cid"
+    assert env["AUTH_OIDC_CLIENT_SECRET"] == "csec"
+    assert env["AUTH_OIDC_USER_NAME_CLAIM"] == "email"
+
+
+def test_frontend_oidc_discovery_uri_handles_trailing_slash():
+    """Discovery URI does not double the slash when the issuer URL ends with one."""
+    env = _frontend_oidc_env(
+        ingress_ready=True,
+        ingress_url="https://traefik.example/datahub",
+        oauth_provider=_oauth_provider(issuer_url="https://idp.example/"),
+    )
+    assert env["AUTH_OIDC_DISCOVERY_URI"] == "https://idp.example/.well-known/openid-configuration"
+
+
+def test_frontend_oidc_env_absent_without_provider_info():
+    """No AUTH_OIDC_* variables are rendered when no provider info is available."""
+    env = _frontend_oidc_env(ingress_ready=True, ingress_url="https://traefik.example/datahub", oauth_provider=None)
+    assert not [key for key in env if key.startswith("AUTH_OIDC_")]
 
 
 class TestFrontendRunInitialization:

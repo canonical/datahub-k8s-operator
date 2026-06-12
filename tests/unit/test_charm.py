@@ -140,6 +140,17 @@ class TestSecretChanged:
 
         mock_reconcile.assert_not_called()
 
+    def test_secret_changed_reconciles_when_oauth_related(self, charm_ctx, base_state):
+        """_on_secret_changed reconciles for any secret while an oauth relation exists."""
+        oauth_rel = testing.Relation(endpoint="oauth", interface="oauth", remote_app_name="hydra")
+        oauth_secret = testing.Secret(tracked_content={"secret": "csec"}, label="oauth-client")  # nosec B105
+        state = testing.State(config=base_state.config, secrets=[oauth_secret], relations=[oauth_rel])
+
+        with patch.object(DatahubK8SOperatorCharm, "reconcile") as mock_reconcile:
+            charm_ctx.run(charm_ctx.on.secret_changed(oauth_secret), state)
+
+        mock_reconcile.assert_called_once()
+
     def test_secret_changed_blocks_on_inaccessible_secret(self, charm_ctx, base_state):
         """_on_secret_changed sets BlockedStatus when the configured secret is inaccessible."""
         secret = testing.Secret(
@@ -256,11 +267,10 @@ class TestCheckStateOIDC:
         return mock_secret
 
     @staticmethod
-    def _state_with_oidc(base_state, *, oidc_id="oidc-id"):
-        """Build a State with `oidc-secret-id` set; connections are stubbed at runtime."""
-        return testing.State(
-            config={**base_state.config, "oidc-secret-id": oidc_id},
-        )
+    def _state_with_oauth(base_state):
+        """Build a State with an oauth relation; connections are stubbed at runtime."""
+        oauth_rel = testing.Relation(endpoint="oauth", interface="oauth", remote_app_name="hydra")
+        return testing.State(config=base_state.config, relations=[oauth_rel])
 
     @staticmethod
     def _set_ingress(charm, *, ready, url):
@@ -268,8 +278,8 @@ class TestCheckStateOIDC:
         charm.frontend_ingress = SimpleNamespace(is_ready=lambda: ready, url=url)
 
     def test_raises_when_oidc_enabled_and_ingress_not_ready(self, charm_ctx, base_state):
-        """_check_state blocks when OIDC is on but the ingress hasn't published a URL."""
-        state = self._state_with_oidc(base_state)
+        """_check_state blocks when oauth is related but the ingress hasn't published a URL."""
+        state = self._state_with_oauth(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
                 _stub_connections(mgr.charm)
@@ -280,8 +290,8 @@ class TestCheckStateOIDC:
         assert "frontend-ingress" in str(exc_info.value)
 
     def test_raises_when_oidc_url_is_plain_http(self, charm_ctx, base_state):
-        """_check_state blocks when OIDC is on but the ingress URL is http://non-localhost."""
-        state = self._state_with_oidc(base_state)
+        """_check_state blocks when oauth is related but the ingress is plain http."""
+        state = self._state_with_oauth(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
                 _stub_connections(mgr.charm)
@@ -292,8 +302,8 @@ class TestCheckStateOIDC:
         assert "HTTPS" in str(exc_info.value)
 
     def test_passes_when_oidc_url_is_https(self, charm_ctx, base_state):
-        """_check_state allows an HTTPS ingress URL with OIDC enabled."""
-        state = self._state_with_oidc(base_state)
+        """_check_state allows an HTTPS ingress URL with oauth related."""
+        state = self._state_with_oauth(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
                 _stub_connections(mgr.charm)
@@ -301,8 +311,8 @@ class TestCheckStateOIDC:
                 mgr.charm._check_state()
 
     def test_passes_when_oidc_url_is_localhost(self, charm_ctx, base_state):
-        """_check_state allows http://localhost for OIDC (OAuth 2.0 dev exemption)."""
-        state = self._state_with_oidc(base_state)
+        """_check_state allows http://localhost with oauth related (OAuth 2.0 dev exemption)."""
+        state = self._state_with_oauth(base_state)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
                 _stub_connections(mgr.charm)
@@ -310,13 +320,55 @@ class TestCheckStateOIDC:
                 mgr.charm._check_state()
 
     def test_skipped_when_oidc_disabled(self, charm_ctx, base_state):
-        """_check_state does not require ingress when OIDC is not configured."""
+        """_check_state does not require ingress when there is no oauth relation."""
         state = testing.State(config=base_state.config)
         with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
             with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
                 _stub_connections(mgr.charm)
                 self._set_ingress(mgr.charm, ready=False, url=None)
                 mgr.charm._check_state()
+
+
+class TestOauthClientConfigPublication:
+    """Tests for the OAuth client config published from reconcile()."""
+
+    @staticmethod
+    def _encryption_secret_mock():
+        """Return a mock Juju secret with valid encryption key contents."""
+        mock_secret = MagicMock()
+        mock_secret.get_content.return_value = {"gms-key": "k1", "frontend-key": "k2"}
+        return mock_secret
+
+    def _run_reconcile_with_oauth(self, charm_ctx, base_state, *, leader):
+        """Run config-changed with an oauth relation and an HTTPS ingress, return the state."""
+        oauth_rel = testing.Relation(endpoint="oauth", interface="oauth", remote_app_name="hydra")
+        state = testing.State(config=base_state.config, relations=[oauth_rel], leader=leader)
+
+        offline_container = MagicMock()
+        offline_container.can_connect.return_value = False
+
+        with charm_ctx(charm_ctx.on.config_changed(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=self._encryption_secret_mock()):
+                _stub_connections(mgr.charm)
+                mgr.charm.frontend_ingress = SimpleNamespace(is_ready=lambda: True, url="https://datahub.example")
+                with patch.object(mgr.charm.unit, "get_container", return_value=offline_container):
+                    state_out = mgr.run()
+
+        return [rel for rel in state_out.relations if rel.endpoint == "oauth"][0]
+
+    def test_leader_publishes_redirect_uri(self, charm_ctx, base_state):
+        """The leader publishes the client config with the ingress-derived redirect URI."""
+        rel_out = self._run_reconcile_with_oauth(charm_ctx, base_state, leader=True)
+
+        assert rel_out.local_app_data["redirect_uri"] == "https://datahub.example/callback/oidc"
+        assert rel_out.local_app_data["scope"] == literals.OAUTH_SCOPE
+        assert json.loads(rel_out.local_app_data["grant_types"]) == literals.OAUTH_GRANT_TYPES
+
+    def test_non_leader_does_not_publish(self, charm_ctx, base_state):
+        """Non-leader units do not write the requirer databag."""
+        rel_out = self._run_reconcile_with_oauth(charm_ctx, base_state, leader=False)
+
+        assert "redirect_uri" not in rel_out.local_app_data
 
 
 class TestGetPebbleLayer:
