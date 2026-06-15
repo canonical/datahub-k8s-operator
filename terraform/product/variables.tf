@@ -84,11 +84,32 @@ variable "machine_model_uuid" {
   }
 }
 
-variable "oidc" {
-  description = "OIDC client credentials for SSO. When set, a Juju secret is created and granted to DataHub. Leave null to disable SSO."
+variable "oauth_external_idp_integrator_charm" {
+  description = "Charm deployment configuration for the oauth-external-idp-integrator (SSO)."
   type = object({
-    client_id     = string
-    client_secret = string
+    app_name    = optional(string, "oauth-external-idp-integrator")
+    channel     = optional(string, "latest/stable")
+    revision    = optional(number)
+    base        = optional(string, "ubuntu@22.04")
+    constraints = optional(string, "arch=amd64")
+    units       = optional(number, 1)
+  })
+  default = {}
+}
+
+variable "oauth_external_idp_integrator_config" {
+  description = "External IdP details for SSO, served over the `oauth` relation. Leave null to disable SSO."
+  type = object({
+    issuer_url             = optional(string, "https://accounts.google.com")
+    authorization_endpoint = optional(string, "https://accounts.google.com/o/oauth2/auth")
+    token_endpoint         = optional(string, "https://oauth2.googleapis.com/token")
+    introspection_endpoint = optional(string, "https://oauth2.googleapis.com/tokeninfo")
+    userinfo_endpoint      = optional(string, "https://www.googleapis.com/oauth2/v1/userinfo")
+    jwks_endpoint          = optional(string, "https://www.googleapis.com/oauth2/v3/certs")
+    scope                  = optional(string, "openid email profile")
+    client_id              = string
+    client_secret          = string
+    jwt_access_token       = optional(bool, false)
   })
   default   = null
   sensitive = true
