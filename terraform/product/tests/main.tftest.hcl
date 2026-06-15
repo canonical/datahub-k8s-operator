@@ -67,7 +67,12 @@ run "wait_for_datahub_active" {
 # Enable SSO on the now-active stack: deploys the external IdP integrator and the oauth
 # integration on top of the base deploy. self-signed-certificates already gives the frontend
 # ingress HTTPS, so the charm's OIDC guard is satisfied.
+#
+# TODO: Once datahub-k8s with `oauth` is in latest/edge, delete the `command = plan` line
+# and uncomment the two wait runs that follow.
 run "enable_sso" {
+  command = plan
+
   variables {
     k8s_model_uuid     = run.setup_tests.k8s_model_uuid
     machine_model_uuid = run.setup_tests.machine_model_uuid
@@ -83,38 +88,38 @@ run "enable_sso" {
   }
 }
 
-run "wait_for_integrator_active" {
-  module {
-    source = "./tests/wait_for_active"
-  }
-
-  variables {
-    model_uuid = run.setup_tests.k8s_model_uuid
-    app_name   = "oauth-external-idp-integrator"
-    timeout    = 600
-  }
-
-  assert {
-    condition     = data.external.app_status.result.status == "active"
-    error_message = "oauth-external-idp-integrator did not reach active state"
-  }
-}
-
-# DataHub must stay active once the oauth relation is wired (HTTPS guard satisfied, client
-# config published, provider info rendered).
-run "wait_for_datahub_active_with_sso" {
-  module {
-    source = "./tests/wait_for_active"
-  }
-
-  variables {
-    model_uuid = run.setup_tests.k8s_model_uuid
-    app_name   = "datahub-k8s"
-    timeout    = 1800
-  }
-
-  assert {
-    condition     = data.external.app_status.result.status == "active"
-    error_message = "datahub-k8s did not stay active after enabling SSO"
-  }
-}
+# run "wait_for_integrator_active" {
+#   module {
+#     source = "./tests/wait_for_active"
+#   }
+#
+#   variables {
+#     model_uuid = run.setup_tests.k8s_model_uuid
+#     app_name   = "oauth-external-idp-integrator"
+#     timeout    = 600
+#   }
+#
+#   assert {
+#     condition     = data.external.app_status.result.status == "active"
+#     error_message = "oauth-external-idp-integrator did not reach active state"
+#   }
+# }
+#
+# # DataHub must stay active once the oauth relation is wired (HTTPS guard satisfied, client
+# # config published, provider info rendered).
+# run "wait_for_datahub_active_with_sso" {
+#   module {
+#     source = "./tests/wait_for_active"
+#   }
+#
+#   variables {
+#     model_uuid = run.setup_tests.k8s_model_uuid
+#     app_name   = "datahub-k8s"
+#     timeout    = 1800
+#   }
+#
+#   assert {
+#     condition     = data.external.app_status.result.status == "active"
+#     error_message = "datahub-k8s did not stay active after enabling SSO"
+#   }
+# }
