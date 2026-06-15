@@ -88,7 +88,7 @@ variable "oauth_external_idp_integrator_charm" {
   description = "Charm deployment configuration for the oauth-external-idp-integrator (SSO)."
   type = object({
     app_name    = optional(string, "oauth-external-idp-integrator")
-    channel     = optional(string, "latest/stable")
+    channel     = optional(string, "latest/edge")
     revision    = optional(number)
     base        = optional(string, "ubuntu@22.04")
     constraints = optional(string, "arch=amd64")

@@ -44,7 +44,7 @@ INGRESS_APPS = (INGRESS_FRONTEND_NAME, INGRESS_GMS_NAME)
 K8S_CERTIFICATES_NAME = "self-signed-certificates"
 K8S_CERTIFICATES_CHANNEL = "latest/stable"
 OAUTH_INTEGRATOR_NAME = "oauth-external-idp-integrator"
-OAUTH_INTEGRATOR_CHANNEL = "latest/stable"
+OAUTH_INTEGRATOR_CHANNEL = "latest/edge"
 OAUTH_STUB_CONFIG = {
     "issuer_url": "https://accounts.google.com",
     "authorization_endpoint": "https://accounts.google.com/o/oauth2/auth",
