@@ -453,7 +453,8 @@ class FrontendService(AbstractService):
             return env
 
         fe_ingress = context.charm.frontend_ingress
-        # a trailing slash here would lead to a double, failing to match the redirect_uri published to the IdP
+        # a trailing slash here would lead to a double slash, 
+        # failing to match the redirect_uri published to the IdP
         oidc_base_url = (fe_ingress.url if fe_ingress.is_ready() else literals.FRONTEND_FALLBACK_URL).rstrip("/")
 
         oidc_env = {
