@@ -161,12 +161,12 @@ def test_oauth_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
 
     logger.info("Deploying oauth-external-idp-integrator with stub IdP config")
     helpers.deploy_oauth_integrator(juju)
+    juju.integrate(f"{app}:oauth", f"{helpers.OAUTH_INTEGRATOR_NAME}:oauth")
     helpers.wait_for_apps_status(
         juju,
         {helpers.OAUTH_INTEGRATOR_NAME: "active"},
         timeout=10 * 60,
     )
-    juju.integrate(f"{app}:oauth", f"{helpers.OAUTH_INTEGRATOR_NAME}:oauth")
 
     try:
         logger.info("Waiting for charm to block on OIDC HTTPS requirement")
