@@ -115,18 +115,23 @@ an external IdP. To use an external IdP (Google as the example):
 4. Give it a name.
 5. Under `Authorized redirect URIs`, add a URI that ends with `/callback/oidc` and begins with the domain used to access the DataHub frontend, e.g. `https://datahub.example.com/callback/oidc`.
 6. Get the `Client ID` and the `Client secret`.
-7. Deploy the integrator and configure it with the credentials and the IdP endpoints:
+7. Deploy the integrator and configure it with the credentials and the IdP endpoints.
+   Write the config to a file:
+```yaml
+# idp-config.yaml
+oauth-external-idp-integrator:
+  issuer_url: https://accounts.google.com
+  authorization_endpoint: https://accounts.google.com/o/oauth2/auth
+  token_endpoint: https://oauth2.googleapis.com/token
+  introspection_endpoint: https://oauth2.googleapis.com/tokeninfo
+  userinfo_endpoint: https://www.googleapis.com/oauth2/v1/userinfo
+  jwks_endpoint: https://www.googleapis.com/oauth2/v3/certs
+  scope: "openid email profile"
+  client_id: <client-id-value>
+  client_secret: <client-secret-value>
+```
 ```sh
-juju deploy oauth-external-idp-integrator
-juju config oauth-external-idp-integrator \
-  issuer_url=https://accounts.google.com \
-  authorization_endpoint=https://accounts.google.com/o/oauth2/auth \
-  token_endpoint=https://oauth2.googleapis.com/token \
-  introspection_endpoint=https://oauth2.googleapis.com/tokeninfo \
-  userinfo_endpoint=https://www.googleapis.com/oauth2/v1/userinfo \
-  jwks_endpoint=https://www.googleapis.com/oauth2/v3/certs \
-  scope="openid email profile" \
-  client_id=<client-id-value> client_secret=<client-secret-value>
+juju deploy oauth-external-idp-integrator --config idp-config.yaml
 ```
 8. Relate DataHub to the integrator (or directly to hydra when using the Identity Platform):
 ```sh
