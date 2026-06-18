@@ -154,15 +154,19 @@ def test_ingress_routes_traffic(full_stack: jubilant.Juju):
     assert "versions" in body, f"GMS /config missing 'versions' key: {body}"
 
 
-def test_oidc_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
-    """OIDC config without HTTPS ingress blocks; integrating TLS lets the charm recover."""
+def test_oauth_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
+    """An oauth relation without HTTPS ingress blocks; integrating TLS lets the charm recover."""
     juju = full_stack
     app = helpers.APP_NAME
 
-    logger.info("Adding stub OIDC secret and configuring the charm")
-    oidc_id, oidc_uri = helpers.add_oidc_secret(juju)
-    juju.grant_secret(oidc_uri, app)
-    juju.config(app, {"oidc-secret-id": oidc_id})
+    logger.info("Deploying oauth-external-idp-integrator with stub IdP config")
+    helpers.deploy_oauth_integrator(juju)
+    juju.integrate(f"{app}:oauth", f"{helpers.OAUTH_INTEGRATOR_NAME}:oauth")
+    helpers.wait_for_apps_status(
+        juju,
+        {helpers.OAUTH_INTEGRATOR_NAME: "active"},
+        timeout=10 * 60,
+    )
 
     try:
         logger.info("Waiting for charm to block on OIDC HTTPS requirement")
@@ -200,9 +204,24 @@ def test_oidc_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
             url = helpers.get_first_proxied_url(juju, traefik)
             assert url.startswith("https://"), f"{traefik} URL still plain http: {url}"
 
+        logger.info("Verifying the frontend redirects /sso to the IdP authorization endpoint")
+        fe_url = helpers.get_first_proxied_url(juju, helpers.INGRESS_FRONTEND_NAME)
+        sso_url = f"{fe_url.rstrip('/')}/sso"
+        location = ""
+        for _ in range(30):
+            response = requests.get(sso_url, timeout=30, verify=False, allow_redirects=False)  # nosec B501
+            location = response.headers.get("Location", "")
+            if response.status_code in (302, 303) and "accounts.google.com" in location:
+                break
+            time.sleep(10)
+        assert "accounts.google.com" in location, f"/sso did not redirect to the IdP: {location!r}"
+
     finally:
-        logger.info("Tearing down OIDC config and TLS integrations so the model stays reusable")
-        juju.config(app, {"oidc-secret-id": ""})
+        logger.info("Tearing down the oauth relation and TLS integrations so the model stays reusable")
+        try:
+            juju.remove_relation(f"{app}:oauth", f"{helpers.OAUTH_INTEGRATOR_NAME}:oauth")
+        except jubilant.CLIError as exc:
+            logger.warning("Failed to remove oauth relation: %s", exc)
         for traefik in helpers.INGRESS_APPS:
             try:
                 juju.remove_relation(

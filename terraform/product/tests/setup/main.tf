@@ -24,6 +24,14 @@ resource "juju_model" "k8s" {
   cloud {
     name = var.k8s_cloud_name
   }
+
+  config = var.k8s_workload_storage != "" ? { workload-storage = var.k8s_workload_storage } : {}
+}
+
+variable "k8s_workload_storage" {
+  description = "StorageClass for workloads in the K8s model. Empty uses the cloud default."
+  type        = string
+  default     = ""
 }
 
 variable "k8s_cloud_name" {

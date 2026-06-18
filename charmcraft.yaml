@@ -45,6 +45,8 @@ charm-libs:
     version: "2"
   - lib: trino_k8s.trino_catalog
     version: "0"
+  - lib: hydra.oauth
+    version: "0"
 
 parts:
   charm:
@@ -93,14 +95,15 @@ requires:
     interface: trino_catalog
     limit: 1
 
+  oauth:
+    interface: oauth
+    limit: 1
+    optional: true
+
 config:
   options:
     encryption-keys-secret-id:
       description: Juju secret ID for the Frontand and GMS encryption keys.
-      type: string
-
-    oidc-secret-id:
-      description: Juju secret ID for the OIDC authentication secrets.
       type: string
 
     kafka-topic-prefix:

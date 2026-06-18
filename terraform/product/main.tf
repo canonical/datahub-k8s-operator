@@ -53,28 +53,53 @@ resource "juju_secret" "encryption_keys" {
   }
 }
 
-resource "juju_secret" "oidc" {
-  count      = var.oidc != null ? 1 : 0
-  model_uuid = var.k8s_model_uuid
-  name       = "datahub-oidc"
-  info       = "OIDC client credentials for DataHub SSO."
-  value = {
-    "client-id"     = var.oidc.client_id
-    "client-secret" = var.oidc.client_secret
-  }
-}
-
 resource "juju_access_secret" "encryption_keys" {
   model_uuid   = var.k8s_model_uuid
   applications = [module.datahub.app_name]
   secret_id    = juju_secret.encryption_keys.secret_id
 }
 
-resource "juju_access_secret" "oidc" {
-  count        = var.oidc != null ? 1 : 0
-  model_uuid   = var.k8s_model_uuid
-  applications = [module.datahub.app_name]
-  secret_id    = juju_secret.oidc[0].secret_id
+### SSO (optional): external IdP integrator related to DataHub over the `oauth` interface
+
+module "oauth_external_idp_integrator" {
+  count  = local.enable_sso ? 1 : 0
+  source = "./modules/oauth-external-idp-integrator"
+
+  app_name    = var.oauth_external_idp_integrator_charm.app_name
+  model_uuid  = var.k8s_model_uuid
+  channel     = var.oauth_external_idp_integrator_charm.channel
+  revision    = var.oauth_external_idp_integrator_charm.revision
+  base        = var.oauth_external_idp_integrator_charm.base
+  constraints = var.oauth_external_idp_integrator_charm.constraints
+  units       = var.oauth_external_idp_integrator_charm.units
+  
+  config = {
+    issuer_url             = var.oauth_external_idp_integrator_config.issuer_url
+    authorization_endpoint = var.oauth_external_idp_integrator_config.authorization_endpoint
+    token_endpoint         = var.oauth_external_idp_integrator_config.token_endpoint
+    introspection_endpoint = var.oauth_external_idp_integrator_config.introspection_endpoint
+    userinfo_endpoint      = var.oauth_external_idp_integrator_config.userinfo_endpoint
+    jwks_endpoint          = var.oauth_external_idp_integrator_config.jwks_endpoint
+    scope                  = var.oauth_external_idp_integrator_config.scope
+    client_id              = sensitive(var.oauth_external_idp_integrator_config.client_id)
+    client_secret          = sensitive(var.oauth_external_idp_integrator_config.client_secret)
+    jwt_access_token       = tostring(var.oauth_external_idp_integrator_config.jwt_access_token)
+  }
+}
+
+resource "juju_integration" "datahub_oauth" {
+  count      = local.enable_sso ? 1 : 0
+  model_uuid = var.k8s_model_uuid
+
+  application {
+    name     = module.datahub.app_name
+    endpoint = module.datahub.requires.oauth
+  }
+
+  application {
+    name     = module.oauth_external_idp_integrator[0].provides.oauth.name
+    endpoint = module.oauth_external_idp_integrator[0].provides.oauth.endpoint
+  }
 }
 
 ### INGRESS + TLS (K8s model)

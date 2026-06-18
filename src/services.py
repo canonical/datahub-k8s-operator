@@ -371,9 +371,6 @@ class FrontendService(AbstractService):
 
         Returns:
             If ready, a dictionary of environment variables for the service.
-
-        Raises:
-            ImproperSecretError: If 'oidc-secret-id' points to a secret with bad contents.
         """
         if not cls.is_enabled(context):
             return None
@@ -450,28 +447,23 @@ class FrontendService(AbstractService):
         env["DATAHUB_SYSTEM_CLIENT_ID"] = context.charm.system_client_id
         env["DATAHUB_SYSTEM_CLIENT_SECRET"] = context.charm.system_client_secret
 
-        # Set up OIDC if needed.
-        if context.charm.config.oidc_secret_id is None:
+        # Set up OIDC if the oauth relation has delivered a registered client.
+        provider = context.charm.oauth_relation.provider_info
+        if provider is None:
             return env
 
-        oidc_secret = context.charm.model.get_secret(id=context.charm.config.oidc_secret_id)
-        content = oidc_secret.get_content(refresh=True)
-        if "" in (
-            content.get("client-id", ""),
-            content.get("client-secret", ""),
-        ):
-            raise exceptions.ImproperSecretError("secret pointed to by 'oidc-secret-id' has improper contents")
-
         fe_ingress = context.charm.frontend_ingress
-        oidc_base_url = fe_ingress.url if fe_ingress.is_ready() else literals.FRONTEND_FALLBACK_URL
+        # a trailing slash here would lead to a double slash,
+        # failing to match the redirect_uri published to the IdP
+        oidc_base_url = (fe_ingress.url if fe_ingress.is_ready() else literals.FRONTEND_FALLBACK_URL).rstrip("/")
 
         oidc_env = {
             "AUTH_OIDC_ENABLED": "true",
-            "AUTH_OIDC_DISCOVERY_URI": "https://accounts.google.com/.well-known/openid-configuration",
+            "AUTH_OIDC_DISCOVERY_URI": f"{provider.issuer_url.rstrip('/')}/.well-known/openid-configuration",
             "AUTH_OIDC_BASE_URL": oidc_base_url,
-            "AUTH_OIDC_SCOPE": "openid profile email",
-            "AUTH_OIDC_CLIENT_ID": content["client-id"],
-            "AUTH_OIDC_CLIENT_SECRET": content["client-secret"],
+            "AUTH_OIDC_SCOPE": literals.OAUTH_SCOPE,
+            "AUTH_OIDC_CLIENT_ID": provider.client_id,
+            "AUTH_OIDC_CLIENT_SECRET": provider.client_secret,
             "AUTH_OIDC_USER_NAME_CLAIM": "email",
         }
         env.update(oidc_env)
@@ -619,7 +611,7 @@ class GMSService(AbstractService):
             "BACKFILL_BROWSE_PATHS_V2": "true",
             # TODO (mertalpt): To be implemented with to o11y update.
             "ENABLE_PROMETHEUS": "false",
-            "MCE_CONSUMER_ENABLED": "true", # still needed for the ingestion scheduler
+            "MCE_CONSUMER_ENABLED": "true",  # still needed for the ingestion scheduler
             "MAE_CONSUMER_ENABLED": "true",
             "PE_CONSUMER_ENABLED": "true",
             "ENTITY_REGISTRY_CONFIG_PATH": "/datahub/datahub-gms/resources/entity-registry.yml",

@@ -30,7 +30,6 @@ class CharmConfig(BaseConfigModel):
         encryption_keys_secret_id: Juju secret ID to use for secret keys.
         use_play_cache_session_store: Flag to determine if Play cache will be used for
             session store instead of having browser based OIDC cookies.
-        oidc_secret_id: Juju secret ID to enable SSO.
         kafka_topic_prefix: Prefix to use for Kafka topic names.
         opensearch_index_prefix: Prefix to use for Opensearch indexes.
         trino_patterns: JSON string with schema, table, and view filter patterns.
@@ -39,7 +38,6 @@ class CharmConfig(BaseConfigModel):
     auth_verbose_logging: bool = False
     encryption_keys_secret_id: str
     use_play_cache_session_store: bool
-    oidc_secret_id: Optional[str] = None
     kafka_topic_prefix: Optional[str] = None
     opensearch_index_prefix: Optional[str] = None
     trino_patterns: str = _TRINO_PATTERNS_DEFAULT

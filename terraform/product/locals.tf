@@ -19,10 +19,12 @@ locals {
   gms_key      = var.encryption_keys.gms_key != "" ? var.encryption_keys.gms_key : random_password.gms_key.result
   frontend_key = var.encryption_keys.frontend_key != "" ? var.encryption_keys.frontend_key : random_password.frontend_key.result
 
+  # SSO: deploy the external IdP integrator and relate it to DataHub when configured.
+  enable_sso = nonsensitive(var.oauth_external_idp_integrator_config != null)
+
   # DataHub config = user-provided config plus the secret IDs created by this module.
   datahub_config = merge(
     var.datahub.config,
     { "encryption-keys-secret-id" = juju_secret.encryption_keys.secret_id },
-    var.oidc != null ? { "oidc-secret-id" = juju_secret.oidc[0].secret_id } : {},
   )
 }

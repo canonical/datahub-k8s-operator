@@ -15,5 +15,6 @@ output "requires" {
     frontend_ingress = "frontend-ingress"
     gms_ingress      = "gms-ingress"
     trino_catalog    = "trino-catalog"
+    oauth            = "oauth"
   }
 }

@@ -15,12 +15,17 @@ output "models" {
   value = {
     datahub = {
       model_uuid = var.k8s_model_uuid
-      components = {
-        datahub-k8s              = module.datahub.app_name
-        traefik-frontend         = module.traefik_frontend.application.name
-        traefik-gms              = module.traefik_gms.application.name
-        self-signed-certificates = module.self_signed_certificates.application.name
-      }
+      components = merge(
+        {
+          datahub-k8s              = module.datahub.app_name
+          traefik-frontend         = module.traefik_frontend.application.name
+          traefik-gms              = module.traefik_gms.application.name
+          self-signed-certificates = module.self_signed_certificates.application.name
+        },
+        local.enable_sso ? {
+          oauth-external-idp-integrator = module.oauth_external_idp_integrator[0].application.name
+        } : {},
+      )
     }
     data-platform = {
       model_uuid = local.deploy_deps ? var.machine_model_uuid : null

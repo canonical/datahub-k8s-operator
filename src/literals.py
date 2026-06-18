@@ -14,6 +14,13 @@ GMS_PORT = 8080
 # is not killed mid-boot, short enough to promptly rescue a genuinely hung start.
 HEALTHCHECK_FAILURE_THRESHOLD = 30
 
+# OAuth/OIDC via the `oauth` relation (Canonical Identity Platform or an
+# external IdP integrator). The callback path is fixed by the DataHub frontend.
+OAUTH_RELATION_NAME = "oauth"
+OAUTH_SCOPE = "openid profile email"
+OAUTH_GRANT_TYPES = ["authorization_code"]
+OIDC_CALLBACK_PATH = "/callback/oidc"
+
 INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
 ENCRYPTION_KEYS_SECRET_LABEL = "datahub-encryption-keys"  # nosec B105
 SYSTEM_CLIENT_ID = "__datahub_system"

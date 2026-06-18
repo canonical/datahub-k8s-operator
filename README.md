@@ -104,26 +104,46 @@ After relations are set and settled, you can access DataHub at its address with 
 
 #### Deploying with SSO
 
-DataHub supports authentication via SSO. In order to enable it in the charm follow the steps:
+DataHub supports authentication via SSO. OIDC credentials are received over the `oauth` relation,
+either from the [Canonical Identity Platform](https://charmhub.io/identity-platform) (hydra) or
+from an [oauth-external-idp-integrator](https://charmhub.io/oauth-external-idp-integrator) bridging
+an external IdP. To use an external IdP (Google as the example):
 
 1. Issue credentials from Google Cloud via its [dashboard](https://console.cloud.google.com/apis/credentials).
 2. On the linked page, click `Create Credentials` and choose `OAuth client ID`.
 3. In the next page, choose `Web application` as the type.
 4. Give it a name.
-5. Under `Authorized redirect URIs`, add a URI that ends with `/callback/oidc` and begins with the domain used to access the DataHub frontend. For local deployment the complete URI would look like `http://localhost:9002/callback/oidc`.
+5. Under `Authorized redirect URIs`, add a URI that ends with `/callback/oidc` and begins with the domain used to access the DataHub frontend, e.g. `https://datahub.example.com/callback/oidc`.
 6. Get the `Client ID` and the `Client secret`.
-7. Create a YAML file of the following format:
+7. Deploy the integrator and configure it with the credentials and the IdP endpoints.
+   Write the config to a file:
 ```yaml
-client-id: <client-id-value>
-client-secret: <client-secret-value>
+# idp-config.yaml
+oauth-external-idp-integrator:
+  issuer_url: https://accounts.google.com
+  authorization_endpoint: https://accounts.google.com/o/oauth2/auth
+  token_endpoint: https://oauth2.googleapis.com/token
+  introspection_endpoint: https://oauth2.googleapis.com/tokeninfo
+  userinfo_endpoint: https://www.googleapis.com/oauth2/v1/userinfo
+  jwks_endpoint: https://www.googleapis.com/oauth2/v3/certs
+  scope: "openid email profile"
+  client_id: <client-id-value>
+  client_secret: <client-secret-value>
 ```
-8. Create a Juju secret.
-9. Go into the Juju model where DataHub is (to be) deployed.
-10. Run `juju add-secret <secret-name> --file=/path/to/yaml` and copy the secret ID.
-11. Deploy DataHub with the added config variable `--config oidc-secret-id=<secret-id>`.
-12. Run `juju grant-secret <secret-name> datahub-k8s` to set permissions.
-13. Proceed with the relations.
-14. If your deployment is behind an HTTP proxy, configure model proxies as described in [Configuring Model Proxies](#configuring-model-proxies).
+```sh
+juju deploy oauth-external-idp-integrator --config idp-config.yaml
+```
+8. Relate DataHub to the integrator (or directly to hydra when using the Identity Platform):
+```sh
+juju integrate datahub-k8s:oauth oauth-external-idp-integrator:oauth
+```
+9. Proceed with the relations. SSO requires the `frontend-ingress` to publish an **HTTPS** URL,
+   so integrate the frontend Traefik with a certificates provider; the charm stays blocked on
+   `OIDC requires an HTTPS ingress URL` until then.
+10. If your deployment is behind an HTTP proxy, configure model proxies as described in [Configuring Model Proxies](#configuring-model-proxies).
+
+Users are matched by the `email` claim, so DataHub user profiles (`urn:li:corpuser:<email>`)
+are preserved as long as the same IdP (or one issuing the same emails) backs the relation.
 
 ### Deploying with Terraform
 
@@ -133,7 +153,8 @@ The repository ships two Terraform modules:
   from your own Terraform solutions.
 - [`terraform/product`](terraform/product) — a **product module** that deploys the full modernized
   stack (PostgreSQL, Kafka + ZooKeeper, OpenSearch, two Traefik ingresses with TLS), creates and
-  grants the encryption-keys and optional OIDC secrets, and wires everything together.
+  grants the encryption-keys secret, optionally deploys the OAuth external-IdP integrator for SSO,
+  and wires everything together.
 
 ### Configuring Model Proxies
 

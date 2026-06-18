@@ -43,6 +43,19 @@ INGRESS_GMS_NAME = "traefik-gms"
 INGRESS_APPS = (INGRESS_FRONTEND_NAME, INGRESS_GMS_NAME)
 K8S_CERTIFICATES_NAME = "self-signed-certificates"
 K8S_CERTIFICATES_CHANNEL = "latest/stable"
+OAUTH_INTEGRATOR_NAME = "oauth-external-idp-integrator"
+OAUTH_INTEGRATOR_CHANNEL = "latest/edge"
+OAUTH_STUB_CONFIG = {
+    "issuer_url": "https://accounts.google.com",
+    "authorization_endpoint": "https://accounts.google.com/o/oauth2/auth",
+    "token_endpoint": "https://oauth2.googleapis.com/token",  # nosec B105
+    "introspection_endpoint": "https://oauth2.googleapis.com/tokeninfo",
+    "userinfo_endpoint": "https://www.googleapis.com/oauth2/v1/userinfo",
+    "jwks_endpoint": "https://www.googleapis.com/oauth2/v3/certs",
+    "scope": "openid email profile",
+    "client_id": "stub-client-id",
+    "client_secret": "stub-client-secret",  # nosec B105
+}
 
 
 def _app_status_current(status: jubilant.Status, app_name: str) -> str:
@@ -425,33 +438,19 @@ def get_first_proxied_url(juju: jubilant.Juju, traefik_app: str) -> str:
     raise ValueError(f"No requirer URL found in {traefik_app} proxied-endpoints: {endpoints}")
 
 
-def add_oidc_secret(juju: jubilant.Juju) -> Tuple[str, str]:
-    """Add a stub OIDC client-credentials Juju secret to the K8s model.
-
-    The content is not validated against a real IdP — the secret only exists
-    so the charm's ``_check_state`` exercises the OIDC code paths.
+def deploy_oauth_integrator(juju: jubilant.Juju) -> None:
+    """Deploy oauth-external-idp-integrator with stub IdP config, if not present.
 
     Args:
         juju: Jubilant object pointing at the K8s model.
-
-    Returns:
-        ``(secret_id, secret_uri)`` tuple.
     """
-    name = "oidc_keys"
-    existing = next(
-        (s for s in juju.secrets() if s.label == name or s.name == name),
-        None,
+    if OAUTH_INTEGRATOR_NAME in juju.status().apps:
+        return
+    juju.deploy(
+        OAUTH_INTEGRATOR_NAME,
+        channel=OAUTH_INTEGRATOR_CHANNEL,
+        config=OAUTH_STUB_CONFIG,
     )
-    if existing:
-        uri = str(existing.uri)
-    else:
-        uri = str(
-            juju.add_secret(
-                name=name,
-                content={"client-id": "stub-client-id", "client-secret": "stub-client-secret"},
-            )
-        )
-    return uri.split(":")[-1], uri
 
 
 def model_short_name(model_name: str) -> str:
