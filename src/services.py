@@ -548,7 +548,7 @@ class GMSService(AbstractService):
     name = "datahub-gms"
     command = "/datahub/datahub-gms/scripts/start.sh"
     healthcheck = {
-        "endpoint": "/health",
+        "endpoint": "/health/live",
         "port": "8080",
     }
 
