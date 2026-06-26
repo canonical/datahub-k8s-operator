@@ -6,6 +6,14 @@ output "app_name" {
   value       = juju_application.datahub_k8s.name
 }
 
+output "provides" {
+  description = "Map of the charm's `provides` integration endpoints."
+  value = {
+    metrics_endpoint  = "metrics-endpoint"
+    grafana_dashboard = "grafana-dashboard"
+  }
+}
+
 output "requires" {
   description = "Map of the charm's `requires` integration endpoints."
   value = {
@@ -16,5 +24,6 @@ output "requires" {
     gms_ingress      = "gms-ingress"
     trino_catalog    = "trino-catalog"
     oauth            = "oauth"
+    logging          = "logging"
   }
 }
