@@ -1,0 +1,64 @@
+# Metric naming: GMS and Frontend run the upstream DataHub jmx_prometheus_javaagent,
+# which emits `java_lang_*` MBeans and the exporter's `jvm_*` built-in collectors.
+# DataHub's own Dropwizard metrics surface under `metrics_com_linkedin_metadata_*`.
+
+groups:
+  - name: datahub_k8s
+    rules:
+      - alert: DatahubServiceDown
+        expr: up{juju_application=~".*datahub.*"} == 0
+        for: 5m
+        keep_firing_for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DataHub metrics target {{ $labels.instance }} is down"
+          description: "A DataHub JMX exporter ({{ $labels.instance }}) on unit {{ $labels.juju_unit }} in the {{ $labels.juju_model }} model has been unreachable for more than 5 minutes."
+
+      - alert: DatahubHeapStarvation
+        expr: >
+          java_lang_Memory_HeapMemoryUsage_used{juju_application=~".*datahub.*"}
+          /
+          java_lang_Memory_HeapMemoryUsage_max{juju_application=~".*datahub.*"}
+          > 0.9
+        for: 10m
+        keep_firing_for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DataHub JVM heap starvation on {{ $labels.instance }}"
+          description: "The JVM behind {{ $labels.instance }} (unit {{ $labels.juju_unit }}, model {{ $labels.juju_model }}) has been above 90% heap usage for 10 minutes and may begin garbage-collection thrashing or OOM."
+
+      - alert: DatahubExcessiveGC
+        # jvm_gc_collection_seconds_sum is the jmx_exporter built-in (seconds, labelled by
+        # `gc`), so rate() is the fraction of wall-clock time spent in GC. Use this rather
+        # than the raw java_lang_<collector>_CollectionTime MBeans (which are GC-algorithm
+        # specific, in ms, and have no generic GarbageCollector name).
+        expr: >
+          sum by (juju_model, juju_unit, instance) (
+            rate(jvm_gc_collection_seconds_sum{juju_application=~".*datahub.*"}[5m])
+          ) > 0.5
+        for: 10m
+        keep_firing_for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DataHub JVM spending excessive time in GC on {{ $labels.instance }}"
+          description: "The JVM behind {{ $labels.instance }} (unit {{ $labels.juju_unit }}, model {{ $labels.juju_model }}) has spent more than 50% of wall-clock time in garbage collection over the last 5 minutes, indicating memory pressure."
+
+      - alert: DatahubKafkaConsumerLag
+        # kafkaLag is the end-to-end consumer lag in milliseconds (now - record timestamp).
+        # 300000 ms = 5 min; tune to the deployment's ingestion volume.
+        expr: >
+          max by (juju_model, juju_unit) (
+            metrics_com_linkedin_metadata_kafka_listener_mcl_MCLKafkaListener_kafkaLag_Max{juju_application=~".*datahub.*"}
+            or
+            metrics_com_linkedin_metadata_kafka_MetadataChangeProposalsProcessor_kafkaLag_Max{juju_application=~".*datahub.*"}
+          ) > 300000
+        for: 15m
+        keep_firing_for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DataHub Kafka consumer lag high on {{ $labels.juju_unit }}"
+          description: "A DataHub embedded Kafka consumer (MCL/MCP) on unit {{ $labels.juju_unit }} in the {{ $labels.juju_model }} model has had end-to-end lag above 5 minutes for 15 minutes; search and graph indices are falling behind metadata ingestion."
