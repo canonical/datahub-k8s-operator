@@ -17,6 +17,9 @@ from charms.data_platform_libs.v0.data_interfaces import (
     OpenSearchRequires,
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from ops.pebble import CheckStatus
 
@@ -164,6 +167,25 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         for ingress in (self.frontend_ingress, self.gms_ingress):
             self.framework.observe(ingress.on.ready, self._on_ingress_changed)
             self.framework.observe(ingress.on.revoked, self._on_ingress_changed)
+
+        # Observability
+        self.metrics_endpoint = MetricsEndpointProvider(
+            self,
+            relation_name="metrics-endpoint",
+            jobs=[
+                {
+                    "job_name": "datahub-gms",
+                    "static_configs": [{"targets": [f"*:{literals.GMS_METRICS_PORT}"]}],
+                },
+                {
+                    "job_name": "datahub-frontend",
+                    "static_configs": [{"targets": [f"*:{literals.FRONTEND_METRICS_PORT}"]}],
+                },
+            ],
+            refresh_event=self.on.config_changed,
+        )
+        self.grafana_dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
+        self.log_forwarder = LogForwarder(self, relation_name="logging")
 
     @property
     def system_client_id(self) -> str:

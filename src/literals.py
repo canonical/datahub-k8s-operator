@@ -9,6 +9,9 @@ PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
 FRONTEND_FALLBACK_URL = f"http://localhost:{FRONTEND_PORT}"
 GMS_PORT = 8080
+# GMS and Frontend share the pod network namespace, use distinct JMX-Prometheus ports
+GMS_METRICS_PORT = 4318
+FRONTEND_METRICS_PORT = 4319
 # Consecutive `up`-check failures before pebble restarts a workload. At the 10s
 # check period this is ~5 min, long enough that a slow-but-healthy JVM cold start
 # is not killed mid-boot, short enough to promptly rescue a genuinely hung start.
