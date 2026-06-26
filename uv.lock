@@ -246,6 +246,22 @@ wheels = [
 ]
 
 [[package]]
+name = "cosl"
+version = "1.9.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ops" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "tenacity" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/00/3e/2f8fe3f460b18cea99722f3cdb885d494de1cc9accef1cd18535c14de3f1/cosl-1.9.2.tar.gz", hash = "sha256:4999be5574c679f8070806f125b2c50fc4bdaa78e8f8247b17868af20e82bcfd", size = 150799, upload-time = "2026-06-16T15:00:42.378Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/66/be/93e0b9eb3de24b5fd670e1de2dac2ab9bdb6e2fcd659a806830aa07bc6ca/cosl-1.9.2-py3-none-any.whl", hash = "sha256:b78248720fc250fb8f3b872c2e0eae760129d80ac76829a556ecc963fe793b81", size = 38346, upload-time = "2026-06-16T15:00:41.215Z" },
+]
+
+[[package]]
 name = "coverage"
 version = "7.13.5"
 source = { registry = "https://pypi.org/simple" }
@@ -376,6 +392,7 @@ dependencies = [
 
 [package.dev-dependencies]
 charmlibs-pydeps = [
+    { name = "cosl" },
     { name = "jsonschema" },
     { name = "ops" },
     { name = "pydantic" },
@@ -407,6 +424,7 @@ static = [
     { name = "bandit", extra = ["toml"] },
 ]
 unit = [
+    { name = "cosl" },
     { name = "coverage", extra = ["toml"] },
     { name = "ops", extra = ["testing"] },
     { name = "pytest" },
@@ -422,6 +440,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 charmlibs-pydeps = [
+    { name = "cosl", specifier = ">=0.0.53" },
     { name = "jsonschema", specifier = "~=4.23" },
     { name = "ops", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = "~=2.8" },
@@ -451,6 +470,7 @@ lint = [
 ]
 static = [{ name = "bandit", extras = ["toml"], specifier = "==1.9.4" }]
 unit = [
+    { name = "cosl", specifier = ">=0.0.53" },
     { name = "coverage", extras = ["toml"], specifier = "==7.13.5" },
     { name = "ops", extras = ["testing"] },
     { name = "pytest", specifier = "==9.0.3" },
@@ -1551,6 +1571,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e9/88/35e4d27d9177d7df76d060e0a18f69c6c5794c96960c94042e20a12c8ba2/stevedore-5.8.0.tar.gz", hash = "sha256:b49867b32ca3016e94100e68dbf26e72aa7b8708d0a3f73c08aeb220370ac715", size = 514710, upload-time = "2026-05-18T09:15:27.731Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/ac/19f9941c74add59d17694930ec8105d5eddeee4ce56dd8632b765ca16d6c/stevedore-5.8.0-py3-none-any.whl", hash = "sha256:88eede9e66ca80e34085b9174e2327da2c61ac91f24f70e41c3ad76e4bb4872b", size = 54553, upload-time = "2026-05-18T09:15:25.82Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
 ]
 
 [[package]]
