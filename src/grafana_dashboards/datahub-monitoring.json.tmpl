@@ -36,10 +36,12 @@
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
+          "custom": { "fillOpacity": 70, "lineWidth": 0, "spanNulls": false },
           "mappings": [
-            { "options": { "0": { "color": "red", "text": "DOWN" } }, "type": "value" },
-            { "options": { "1": { "color": "green", "text": "UP" } }, "type": "value" }
+            { "options": { "0": { "text": "DOWN", "index": 0 }, "1": { "text": "UP", "index": 1 } }, "type": "value" }
           ],
+          "max": 1,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -52,25 +54,26 @@
       },
       "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
       "id": 2,
+      "interval": "1m",
       "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "value_and_name"
+        "alignValue": "left",
+        "legend": { "displayMode": "hidden", "showLegend": false },
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "showValue": "never",
+        "tooltip": { "mode": "single", "sort": "none" }
       },
-      "pluginVersion": "10.0.0",
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
           "expr": "label_replace(up{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\", job=~\".*datahub.*\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
+          "interval": "1m",
           "legendFormat": "{{ container }} ({{ juju_unit }})",
           "refId": "A"
         }
       ],
       "title": "DataHub availability",
-      "type": "stat"
+      "type": "state-timeline"
     },
     {
       "collapsed": false,
@@ -100,20 +103,20 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_kafka_listener_mcl_MCLKafkaListener_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "MCL (change-log)",
+          "expr": "label_replace(metrics_com_linkedin_metadata_kafka_listener_mcl_MCLKafkaListener_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "MCL (change-log) / {{ unit }}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_kafka_MetadataChangeProposalsProcessor_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "MCP (change-proposal)",
+          "expr": "label_replace(metrics_com_linkedin_metadata_kafka_MetadataChangeProposalsProcessor_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "MCP (change-proposal) / {{ unit }}",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_kafka_DataHubUsageEventsProcessor_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "Usage events",
+          "expr": "label_replace(metrics_com_linkedin_metadata_kafka_DataHubUsageEventsProcessor_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "Usage events / {{ unit }}",
           "refId": "C"
         }
       ],
@@ -140,14 +143,14 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_entity_EntityServiceImpl_ingestAspectsToLocalDB_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "mean",
+          "expr": "label_replace(metrics_com_linkedin_metadata_entity_EntityServiceImpl_ingestAspectsToLocalDB_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "mean / {{ unit }}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_entity_EntityServiceImpl_ingestAspectsToLocalDB_99thPercentile{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "p99",
+          "expr": "label_replace(metrics_com_linkedin_metadata_entity_EntityServiceImpl_ingestAspectsToLocalDB_99thPercentile{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "p99 / {{ unit }}",
           "refId": "B"
         }
       ],
@@ -174,14 +177,14 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_search_elasticsearch_query_ESSearchDAO_searchRequest_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "mean",
+          "expr": "label_replace(metrics_com_linkedin_metadata_search_elasticsearch_query_ESSearchDAO_searchRequest_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "mean / {{ unit }}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_search_elasticsearch_query_ESSearchDAO_searchRequest_99thPercentile{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "p99",
+          "expr": "label_replace(metrics_com_linkedin_metadata_search_elasticsearch_query_ESSearchDAO_searchRequest_99thPercentile{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "p99 / {{ unit }}",
           "refId": "B"
         }
       ],
@@ -208,8 +211,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "metrics_com_linkedin_metadata_search_elasticsearch_update_ESBulkProcessor_num_elasticSearch_writes_OneMinuteRate{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
-          "legendFormat": "writes/s",
+          "expr": "label_replace(metrics_com_linkedin_metadata_search_elasticsearch_update_ESBulkProcessor_num_elasticSearch_writes_OneMinuteRate{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "writes/s / {{ unit }}",
           "refId": "A"
         }
       ],
@@ -246,8 +249,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "label_replace(java_lang_Memory_HeapMemoryUsage_used{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"} / java_lang_Memory_HeapMemoryUsage_max{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
-          "legendFormat": "{{ container }}",
+          "expr": "label_replace(label_replace(java_lang_Memory_HeapMemoryUsage_used{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"} / java_lang_Memory_HeapMemoryUsage_max{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
           "refId": "A"
         }
       ],
@@ -274,8 +277,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "label_replace(java_lang_Memory_HeapMemoryUsage_used{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
-          "legendFormat": "{{ container }}",
+          "expr": "label_replace(label_replace(java_lang_Memory_HeapMemoryUsage_used{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
           "refId": "A"
         }
       ],
@@ -302,8 +305,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "label_replace(rate(jvm_gc_collection_seconds_sum{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}[$__rate_interval]), \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
-          "legendFormat": "{{ container }} - {{ gc }}",
+          "expr": "label_replace(label_replace(rate(jvm_gc_collection_seconds_sum{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}[$__rate_interval]), \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }} - {{ gc }}",
           "refId": "A"
         }
       ],
@@ -330,8 +333,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "label_replace(java_lang_Threading_ThreadCount{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
-          "legendFormat": "{{ container }}",
+          "expr": "label_replace(label_replace(java_lang_Threading_ThreadCount{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
           "refId": "A"
         }
       ],
@@ -360,8 +363,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
-          "expr": "label_replace(java_lang_OperatingSystem_ProcessCpuLoad{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\", job=~\".*datahub.*\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
-          "legendFormat": "{{ container }}",
+          "expr": "label_replace(label_replace(java_lang_OperatingSystem_ProcessCpuLoad{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\", job=~\".*datahub.*\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
           "refId": "A"
         }
       ],
