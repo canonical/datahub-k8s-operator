@@ -22,7 +22,7 @@ description: |
   warehouses and pipelines.
 
 assumes:
-  - juju >= 3.3
+  - juju >= 3.4
 
 bases:
   - build-on:
@@ -47,6 +47,12 @@ charm-libs:
     version: "0"
   - lib: hydra.oauth
     version: "0"
+  - lib: prometheus_k8s.prometheus_scrape
+    version: "0"
+  - lib: grafana_k8s.grafana_dashboard
+    version: "0"
+  - lib: loki_k8s.loki_push_api
+    version: "1"
 
 parts:
   charm:
@@ -69,7 +75,16 @@ parts:
 peers:
   peer:
     interface: datahub
-    
+
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+    optional: true
+
+  grafana-dashboard:
+    interface: grafana_dashboard
+    optional: true
+
 requires:
   db:
     interface: postgresql_client
@@ -97,6 +112,11 @@ requires:
 
   oauth:
     interface: oauth
+    limit: 1
+    optional: true
+
+  logging:
+    interface: loki_push_api
     limit: 1
     optional: true
 

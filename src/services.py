@@ -385,8 +385,7 @@ class FrontendService(AbstractService):
             "JAVA_HOME": literals.JAVA_HOME,
             "THEME_V2_DEFAULT": "true",
             "MFE_CONFIG_FILE_PATH": "/datahub-frontend/conf/mfe.config.dev.yaml",
-            # TODO (mertalpt): To be implemented with to o11y update.
-            "ENABLE_PROMETHEUS": "false",
+            "ENABLE_PROMETHEUS": "true",
             # TODO (mertalpt): This changes when we split services into multiple charms.
             "DATAHUB_GMS_HOST": "localhost",
             "DATAHUB_GMS_PORT": "8080",
@@ -609,8 +608,7 @@ class GMSService(AbstractService):
             "SHOW_SEARCH_FILTERS_V2": "true",
             "SHOW_BROWSE_V2": "true",
             "BACKFILL_BROWSE_PATHS_V2": "true",
-            # TODO (mertalpt): To be implemented with to o11y update.
-            "ENABLE_PROMETHEUS": "false",
+            "ENABLE_PROMETHEUS": "true",
             "MCE_CONSUMER_ENABLED": "true",  # still needed for the ingestion scheduler
             "MAE_CONSUMER_ENABLED": "true",
             "PE_CONSUMER_ENABLED": "true",
