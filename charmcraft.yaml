@@ -8,18 +8,31 @@
 
 name: datahub-k8s
 type: charm
-title: DataHub
-summary: DataHub operator
+title: Charmed DataHub
+summary: An extensible metadata platform for data discovery, observability, and governance.
 description: |
-  DataHub is an extensible data catalog that enables data discovery, data observability
-  and federated data governance.
+  DataHub is an extensible data catalog that enables data discovery, data observability,
+  and federated data governance. It gathers metadata such as tables, topics, schemas,
+  ownership, and lineage from your data systems and serves it through a searchable web
+  interface and a rich API.
 
-  DataHub provides a service that can integrate with metadata sources such as PostgreSQL
-  and Kafka after which metadata such as tables, topics, schema and lineage is gathered
-  and served.
+  This charm automates the deployment, configuration, and lifecycle management of DataHub
+  on Kubernetes. It manages the DataHub metadata service (GMS), web frontend, and actions
+  framework, and integrates with PostgreSQL, Kafka, and OpenSearch for storage, with Trino
+  for automatic metadata ingestion, with identity providers for single sign-on, and with
+  the Canonical Observability Stack for monitoring.
 
-  It is useful for keeping track of schema, ownership and dependency information in data
-  warehouses and pipelines.
+  It is intended for data platform teams who want a governed, discoverable data landscape
+  without the complexity of manual deployment and ongoing service management. It is a core
+  component of the Canonical Data Mesh solution.
+
+links:
+  documentation:
+    - https://github.com/canonical/canonical-data-mesh-docs
+  source: 
+    - https://github.com/canonical/datahub-k8s-operator
+  issues: 
+    - https://github.com/canonical/datahub-k8s-operator/issues
 
 assumes:
   - juju >= 3.4
@@ -123,15 +136,22 @@ requires:
 config:
   options:
     encryption-keys-secret-id:
-      description: Juju secret ID for the Frontand and GMS encryption keys.
+      description: |
+        Juju secret ID for the frontend and GMS encryption keys. The secret must
+        contain the keys `gms-key` and `frontend-key`, and must be granted to the
+        charm with `juju grant-secret`.
       type: string
 
     kafka-topic-prefix:
-      description: Prefix for the names of Kafka topics created and used by DataHub.
+      description: |
+        Prefix for the names of Kafka topics created and used by DataHub.
+        Useful when several DataHub deployments share a Kafka cluster.
       type: string
 
     opensearch-index-prefix:
-      description: Prefix for the names of Opensearch indices created and used by DataHub.
+      description: |
+        Prefix for the names of OpenSearch indices created and used by DataHub.
+        Useful when several DataHub deployments share an OpenSearch cluster.
       type: string
 
     use-play-cache-session-store:
@@ -148,22 +168,27 @@ config:
         JSON object containing schema, table, and view filter patterns for
         Trino ingestion sources.  Each key ("schema-pattern", "table-pattern",
         "view-pattern") maps to an object with "allow" and "deny" lists of
-        regex patterns.
+        regex patterns. Patterns are applied only when an ingestion source is
+        first created, so changing this option affects future catalogs, not
+        existing sources.
       type: string
       default: '{"schema-pattern":{"allow":[".*"],"deny":[]},"table-pattern":{"allow":[".*"],"deny":[]},"view-pattern":{"allow":[".*"],"deny":[]}}'
 
 actions:
   get-password:
-    description: Return the auto-generated initial admin password.
+    description: |
+      Return the auto-generated initial admin password. The default admin
+      username is `datahub`.
   reindex:
-    description: Rebuild search and graph indices from metadata store.
+    description: |
+      Rebuild the search and graph indices from the metadata store. Fetches the
+      latest version of each metadata aspect from the database and re-indexes it.
+      Run on the leader unit after a restore or migration, or when search results
+      are missing or stale.
     params:
       clean:
         type: boolean
-        description: |
-          This process fetches the latest version of each aspect from the database
-          and rebuilds the search and graph indices. If --clean is set, the existing
-          indices will be deleted before reindexing.
+        description: Delete the existing indices before reindexing.
     additionalProperties: false
 
 containers:
