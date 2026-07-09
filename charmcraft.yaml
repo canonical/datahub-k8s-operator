@@ -101,26 +101,32 @@ requires:
   db:
     interface: postgresql_client
     limit: 1
+    optional: false
 
   kafka:
     interface: kafka_client
     limit: 1
+    optional: false
 
   opensearch:
     interface: opensearch_client
     limit: 1
+    optional: false
 
   frontend-ingress:
     interface: ingress
     limit: 1
+    optional: false
 
   gms-ingress:
     interface: ingress
     limit: 1
+    optional: false
 
   trino-catalog:
     interface: trino_catalog
     limit: 1
+    optional: false
 
   oauth:
     interface: oauth
@@ -178,6 +184,7 @@ actions:
     description: |
       Return the auto-generated initial admin password. The default admin
       username is `datahub`.
+    additionalProperties: false
   reindex:
     description: |
       Rebuild the search and graph indices from the metadata store. Fetches the
