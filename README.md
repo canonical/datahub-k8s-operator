@@ -2,6 +2,8 @@
 
 This is the Kubernetes operator for [DataHub](https://datahubproject.io/), available on [Charmhub](https://charmhub.io/datahub-k8s).
 
+Full documentation for this charm (tutorial, how-to guides, reference, and explanation) lives in the [Canonical Data Mesh documentation](https://github.com/canonical/canonical-data-mesh-docs). Configurations, integrations, and actions are listed on the [Charmhub page](https://charmhub.io/datahub-k8s).
+
 ## Description
 
 DataHub is an extensible data catalog that enables data discovery, data observability and federated data governance.
@@ -15,7 +17,7 @@ The charm manages three containers:
 
 ## Usage
 
-Note: This operator requires the use of `juju>=3.3`.
+Note: This operator requires the use of `juju>=3.4`.
 
 The DataHub charm relies on a number of other charms for core functionality:
 - [PostgreSQL](https://charmhub.io/postgresql), for storing metadata.
