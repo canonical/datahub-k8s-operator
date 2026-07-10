@@ -116,17 +116,17 @@ requires:
   frontend-ingress:
     interface: ingress
     limit: 1
-    optional: false
+    optional: true
 
   gms-ingress:
     interface: ingress
     limit: 1
-    optional: false
+    optional: true
 
   trino-catalog:
     interface: trino_catalog
     limit: 1
-    optional: false
+    optional: true
 
   oauth:
     interface: oauth
