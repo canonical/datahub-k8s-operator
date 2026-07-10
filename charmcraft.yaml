@@ -8,7 +8,7 @@
 
 name: datahub-k8s
 type: charm
-title: Charmed DataHub
+title: DataHub
 summary: An extensible metadata platform for data discovery, observability, and governance.
 description: |
   DataHub is an extensible data catalog that enables data discovery, data observability,
