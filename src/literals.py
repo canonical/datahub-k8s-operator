@@ -31,6 +31,11 @@ SYSTEM_CLIENT_SECRET_LABEL = "datahub-system-client-secret"  # nosec B105
 INGESTION_TOKEN_SECRET_LABEL = "datahub-ingestion-token"  # nosec B105
 DEFAULT_EXECUTOR_ID = "default"
 
+# `datahub_client` relation: one DataHub service account and one Juju secret
+# holding its access token, per relation.
+DATAHUB_CLIENT_RELATION_NAME = "datahub-client"
+DATAHUB_CLIENT_SA_NAME_PREFIX = "[juju] "
+
 # Paths for scripts baked into the rocks (see datahub_rocks/shared/scripts/).
 RUNNER_PATH = "/charm-scripts/runner.sh"
 

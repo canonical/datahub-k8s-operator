@@ -61,14 +61,21 @@ def _graphql_request(
     return body
 
 
-def create_access_token(system_client_id: str, system_client_secret: str) -> str:
-    """Create a DataHub access token for the system user.
+def create_access_token(
+    system_client_id: str,
+    system_client_secret: str,
+    actor_urn: str = f"urn:li:corpuser:{literals.SYSTEM_CLIENT_ID}",
+    name: str = "juju-managed-ingestion-token",
+) -> str:
+    """Create a DataHub access token for an actor.
 
     Uses Basic auth with system client credentials to bootstrap a token.
 
     Args:
         system_client_id: DataHub system client identifier.
         system_client_secret: DataHub system client secret.
+        actor_urn: URN of the actor the token authenticates as.
+        name: Human-readable name shown in the DataHub token list.
 
     Returns:
         The generated access token string.
@@ -82,14 +89,102 @@ def create_access_token(system_client_id: str, system_client_secret: str) -> str
     variables = {
         "input": {
             "type": "PERSONAL",
-            "actorUrn": f"urn:li:corpuser:{literals.SYSTEM_CLIENT_ID}",
+            "actorUrn": actor_urn,
             "duration": "NO_EXPIRY",
-            "name": "juju-managed-ingestion-token",
+            "name": name,
         }
     }
     basic_credentials = f"{system_client_id}:{system_client_secret}"
     body = _graphql_request(query, variables, basic_credentials, auth_scheme="Basic")
     return body["data"]["createAccessToken"]["accessToken"]
+
+
+def list_service_accounts(system_client_id: str, system_client_secret: str) -> Dict[str, str]:
+    """List DataHub service accounts, returning a URN-to-display-name mapping.
+
+    Args:
+        system_client_id: DataHub system client identifier.
+        system_client_secret: DataHub system client secret.
+
+    Returns:
+        Dictionary mapping service account URNs to their display names.
+    """
+    query = textwrap.dedent("""\
+        query listServiceAccounts($input: ListServiceAccountsInput!) {
+            listServiceAccounts(input: $input) {
+                total
+                serviceAccounts {
+                    urn
+                    displayName
+                }
+            }
+        }""")
+    basic_credentials = f"{system_client_id}:{system_client_secret}"
+    start = 0
+    count = 100
+    accounts: Dict[str, str] = {}
+
+    while True:
+        prev_size = len(accounts)
+        variables = {"input": {"start": start, "count": count}}
+        body = _graphql_request(query, variables, basic_credentials, auth_scheme="Basic")
+        data = body["data"]["listServiceAccounts"]
+        for account in data.get("serviceAccounts", []):
+            accounts[account["urn"]] = account.get("displayName") or ""
+        if len(accounts) >= data["total"] or len(accounts) == prev_size:
+            break
+        start += count
+
+    return accounts
+
+
+def create_service_account(
+    system_client_id: str,
+    system_client_secret: str,
+    display_name: str,
+    description: str,
+) -> str:
+    """Create a DataHub service account.
+
+    DataHub assigns the URN; it cannot be chosen by the caller.
+
+    Args:
+        system_client_id: DataHub system client identifier.
+        system_client_secret: DataHub system client secret.
+        display_name: Display name for the service account.
+        description: Description shown in the DataHub UI.
+
+    Returns:
+        URN of the newly created service account.
+    """
+    query = textwrap.dedent("""\
+        mutation createServiceAccount($input: CreateServiceAccountInput!) {
+            createServiceAccount(input: $input) {
+                urn
+            }
+        }""")
+    variables = {"input": {"displayName": display_name, "description": description}}
+    basic_credentials = f"{system_client_id}:{system_client_secret}"
+    body = _graphql_request(query, variables, basic_credentials, auth_scheme="Basic")
+    return body["data"]["createServiceAccount"]["urn"]
+
+
+def delete_service_account(system_client_id: str, system_client_secret: str, urn: str) -> None:
+    """Delete a DataHub service account.
+
+    Deleting the account invalidates every access token issued for it.
+
+    Args:
+        system_client_id: DataHub system client identifier.
+        system_client_secret: DataHub system client secret.
+        urn: URN of the service account to delete.
+    """
+    query = textwrap.dedent("""\
+        mutation deleteServiceAccount($urn: String!) {
+            deleteServiceAccount(urn: $urn)
+        }""")
+    basic_credentials = f"{system_client_id}:{system_client_secret}"
+    _graphql_request(query, {"urn": urn}, basic_credentials, auth_scheme="Basic")
 
 
 def list_secrets(bearer_token: str) -> Dict[str, str]:
