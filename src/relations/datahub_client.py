@@ -78,7 +78,7 @@ class DatahubClientRelation(framework.Object):
         ingress_url = self.charm.gms_ingress.url if self.charm.gms_ingress.is_ready() else None
         if ingress_url:
             return ingress_url.rstrip("/")
-        return f"http://{self.charm.app.name}.{self.charm.model.name}" f".svc.cluster.local:{literals.GMS_PORT}"
+        return f"http://{self.charm.app.name}.{self.charm.model.name}.svc.cluster.local:{literals.GMS_PORT}"
 
     @log_event_handler(logger)
     def _on_relation_changed(self, event) -> None:
