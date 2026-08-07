@@ -28,7 +28,7 @@ from ops.framework import Object
 from ops.model import ModelError, Relation, SecretNotFoundError
 
 # The unique Charmhub library identifier, never change it
-LIBID = "4ff63aa2b2d343dda41ef50d08be8414"
+LIBID = "e20436709cfa48f289bf37c08b53b482"
 
 # Increment this major API version when introducing breaking changes
 LIBAPI = 0

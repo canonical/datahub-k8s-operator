@@ -65,6 +65,8 @@ charm-libs:
     version: "0"
   - lib: loki_k8s.loki_push_api
     version: "1"
+  - lib: datahub_k8s.datahub_client
+    version: "0"
 
 parts:
   charm:
