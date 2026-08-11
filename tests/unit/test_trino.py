@@ -216,7 +216,12 @@ class TestTrinoRelationAuth:
             second = rel.access_token
             assert first == "tok-abc"
             assert second == "tok-abc"
-            mock_create.assert_called_once_with(literals.SYSTEM_CLIENT_ID, "test-secret")
+            mock_create.assert_called_once_with(
+                literals.SYSTEM_CLIENT_ID,
+                "test-secret",
+                actor_urn=literals.SYSTEM_ACTOR_URN,
+                name=literals.INGESTION_TOKEN_NAME,
+            )
             mock_store.assert_called_once_with("tok-abc")
 
     def test_access_token_reused_from_store(self):

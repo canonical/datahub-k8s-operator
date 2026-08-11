@@ -12,11 +12,20 @@ Access Token for it, stores the token in a Juju secret granted to the relation, 
 publishes the GMS URL alongside the secret ID. The requirer reads both and configures
 its workload.
 
-Provider application databag:
+Provider application databag (every field is a string):
 
     gms-url               URL of the GMS API, reachable from the requirer.
+                          "http://datahub-k8s.datahub-k8s.svc.cluster.local:8080"
     secret-id             ID of a Juju secret whose `token` key holds the PAT.
+                          "secret://3a214b83-9add-45e4-83af-665104bec574/akrgmperhr88jppn48ug"
     service-account-urn   URN of the DataHub service account the token acts as.
+                          "urn:li:corpuser:service_cb8b10ee-6bb0-4db6-9fc3-337eb588cc2c"
+
+Token lifetime: the PAT does not expire and is not rotated on a schedule. It is
+tied to the service account, so removing the relation deletes the account and
+invalidates the token with it. The provider also re-mints a token whenever the
+service account it belongs to is gone, which is what makes revoking an account
+in DataHub a working way to force a new one.
 """
 
 import logging
@@ -35,7 +44,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 2
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +192,7 @@ class DatahubClientRequirer(Object):
             return None
 
         if not token:
-            logger.warning("datahub-client token secret '%s' has no '%s' key", secret_id, TOKEN_SECRET_KEY)
+            logger.warning("datahub-client token secret '%s' carries no usable '%s'", secret_id, TOKEN_SECRET_KEY)
             return None
 
         return DatahubConnection(

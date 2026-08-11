@@ -20,6 +20,12 @@ from log import log_event_handler
 
 logger = logging.getLogger(__name__)
 
+# Service accounts this charm manages are named "[juju] <app>-<relation id>",
+# e.g. "[juju] datahub-mcp-k8s-7". The prefix marks them as ours so accounts a
+# human created are never touched; the trailing ID says which relation an
+# account belongs to, which is what lets reconcile spot the obsoletes. An app
+# name may itself contain digits and hyphens, so only the last `-<digits>`
+# is the relation ID.
 _MANAGED_NAME_PATTERN = re.compile(rf"^{re.escape(literals.DATAHUB_CLIENT_SA_NAME_PREFIX)}.+-(\d+)$")
 
 

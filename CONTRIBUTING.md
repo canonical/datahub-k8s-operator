@@ -318,6 +318,13 @@ After the final command, it will take some time for the `datahub-frontend` conta
 juju run datahub-k8s/0 get-password
 ```
 
+**Note:** With the [multipass](#multipass-environment-setup) setup, that address is only routable from inside the VM. Either browse from `multipass shell charm-dev`, or forward the port out of the VM:
+
+```shell
+# Inside the VM. `multipass list` gives the VM address to browse from the host.
+microk8s kubectl port-forward -n datahub-k8s pod/datahub-k8s-0 9002:9002 --address 0.0.0.0
+```
+
 **Note:** If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not load. This is best identified by the requests to `/graphql` returning a `500`.
 
 **Note:** The GMS container uses `runner.sh` to execute initialization scripts (PostgreSQL setup, OpenSearch index creation, schema migration). The runner duplexes all output to log files under `/tmp` in the `datahub-gms` container. If an initialization step fails, you can list and read the logs with:

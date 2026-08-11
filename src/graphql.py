@@ -64,8 +64,8 @@ def _graphql_request(
 def create_access_token(
     system_client_id: str,
     system_client_secret: str,
-    actor_urn: str = f"urn:li:corpuser:{literals.SYSTEM_CLIENT_ID}",
-    name: str = "juju-managed-ingestion-token",
+    actor_urn: str,
+    name: str,
 ) -> str:
     """Create a DataHub access token for an actor.
 
