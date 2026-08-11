@@ -451,7 +451,12 @@ class TrinoRelation(framework.Object):
             self._access_token = stored
             return self._access_token
 
-        token = graphql.create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+        token = graphql.create_access_token(
+            self.charm.system_client_id,
+            self.charm.system_client_secret,
+            actor_urn=literals.SYSTEM_ACTOR_URN,
+            name=literals.INGESTION_TOKEN_NAME,
+        )
         self._access_token = token
         self._store_access_token(token)
         return self._access_token
@@ -547,7 +552,12 @@ class TrinoRelation(framework.Object):
                 if attempt == 0:
                     logger.info("Authentication failed, refreshing token and retrying")
                     self._access_token = None
-                    token = graphql.create_access_token(self.charm.system_client_id, self.charm.system_client_secret)
+                    token = graphql.create_access_token(
+                        self.charm.system_client_id,
+                        self.charm.system_client_secret,
+                        actor_urn=literals.SYSTEM_ACTOR_URN,
+                        name=literals.INGESTION_TOKEN_NAME,
+                    )
                     self._access_token = token
                     self._store_access_token(token)
                     continue

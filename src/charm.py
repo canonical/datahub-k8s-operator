@@ -28,6 +28,7 @@ import literals
 import services
 import utils
 from log import log_event_handler
+from relations.datahub_client import DatahubClientRelation
 from relations.kafka import KafkaRelation
 from relations.oauth import OauthRelation
 from relations.opensearch import OpenSearchRelation
@@ -148,6 +149,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         # OAuth (SSO via the Canonical Identity Platform or an external IdP integrator)
         self.oauth_relation = OauthRelation(self)
+
+        # DataHub API clients (e.g. the MCP server) served a per-relation service account
+        self.datahub_client_relation = DatahubClientRelation(self)
 
         # Ingress. `strip_prefix=True` so Traefik strips the per-app path
         # prefix before forwarding, the frontend SPA and GMS REST endpoints
@@ -370,6 +374,17 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         except Exception as e:
             logger.error("Trino reconciliation failed: %s", str(e))
 
+    def _reconcile_datahub_clients_if_ready(self):
+        """Provision DataHub API clients if preconditions are met."""
+        if not self.unit.is_leader():
+            return
+        if not self.model.get_relation(literals.DATAHUB_CLIENT_RELATION_NAME):
+            return
+        try:
+            self.datahub_client_relation.reconcile_clients()
+        except Exception as e:
+            logger.error("DataHub client reconciliation failed: %s", str(e))
+
     def _check_state(self):  # noqa: C901
         """Check the current state of the relations and overall charm readiness.
 
@@ -550,6 +565,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 return
 
         self._reconcile_trino_if_ready()
+        self._reconcile_datahub_clients_if_ready()
 
         self.unit.status = ops.ActiveStatus()
 

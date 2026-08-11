@@ -141,6 +141,10 @@ make test-integration  # Runs integration tests*
 
 *: It is recommended to let CI runners run integration tests on GitHub Actions.
 
+## Charm libraries owned by this repository
+
+[`lib/charms/datahub_k8s/v0/datahub_client.py`](lib/charms/datahub_k8s/v0/datahub_client.py) defines both sides of the `datahub_client` interface. Requirer charms carry a copy, so after changing it, bump `LIBPATCH`, publish it, and update the requirers if needed.
+
 ## Deploying locally
 
 ### Multipass environment setup
@@ -308,7 +312,18 @@ juju integrate datahub-k8s os-client
 
 **Note:** It is highly recommended to wait between commands to let `juju status` show an `active-idle` status for the charm.
 
-After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on `localhost:9002` with `datahub` for the username and the password fetched as described in the [README](./README.md#deploying-datahub). Refer to [below](#accessing-datahub-from-the-host-machine) on how to connect to a `datahub` deployment inside a `multipass` VM.
+After the final command, it will take some time for the `datahub-frontend` container to settle. Once it does, you can login on port `9002` of the unit address with `datahub` for the username and the password fetched with:
+
+```shell
+juju run datahub-k8s/0 get-password
+```
+
+**Note:** With the [multipass](#multipass-environment-setup) setup, that address is only routable from inside the VM. Either browse from `multipass shell charm-dev`, or forward the port out of the VM:
+
+```shell
+# Inside the VM. `multipass list` gives the VM address to browse from the host.
+microk8s kubectl port-forward -n datahub-k8s pod/datahub-k8s-0 9002:9002 --address 0.0.0.0
+```
 
 **Note:** If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not load. This is best identified by the requests to `/graphql` returning a `500`.
 

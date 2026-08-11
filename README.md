@@ -6,7 +6,7 @@ Full documentation for this charm (tutorial, how-to guides, reference, and expla
 
 ## Description
 
-DataHub is an extensible data catalog that enables data discovery, data observability and federated data governance.
+DataHub is an extensible data catalog that enables data discovery, data observability and federated data governance. It is a component of the Canonical Data Mesh solution.
 
 ### Architecture
 
@@ -50,14 +50,14 @@ juju deploy postgresql
 juju deploy kafka
 juju deploy zookeeper
 juju deploy opensearch --channel 2/edge -n 2
-juju deploy self-signed-certificates-operator
+juju deploy self-signed-certificates
 
 # Wait for the units to settle
 juju status --watch 3s --color
 
 # Relate
 juju relate kafka zookeeper
-juju relate opensearch self-signed-certificates-operator
+juju relate opensearch self-signed-certificates
 
 # Create named offers
 juju offer postgresql:database pg-client
@@ -273,6 +273,16 @@ The charm creates the following resources in DataHub, identifiable by their nami
 
 When a catalog is removed or the Trino relation is broken, the corresponding ingestion sources and secrets are automatically deleted. User-created secrets and ingestion sources are not affected if they do not match the charm conventions.
 
+### Serving the API to other charms
+
+The `datahub-client` endpoint (interface `datahub_client`) lets another charm consume the GMS API without anyone handling a token by hand. On integration, DataHub creates a **service account** dedicated to that relation, mints a Personal Access Token for it, stores the token in a Juju secret granted to the relation, and publishes the GMS URL and the secret ID:
+
+```sh
+juju integrate datahub-k8s datahub-mcp-k8s
+```
+
+The service account gets no privileges of its own, so it inherits DataHub's default all-users policies of metadata read, no writes. Grant it a policy in DataHub if a consumer needs more. Removing the relation deletes the service account, which invalidates every token issued for it.
+
 ### Troubleshooting
 
 - **Opensearch offer blocked**: If the Opensearch offer is blocked from the provider end, DataHub will load but some functionalities such as `Ingestion` will not work. This is best identified by requests to `/graphql` returning a `500` error. Ensure the offer is accepted on the provider side.
@@ -287,7 +297,9 @@ kubectl -n <namespace> exec -c datahub-gms datahub-k8s-0 -- cat /tmp/<log-file>
 ```
 
 ## Contributing
+
 This charm is still in active development. Please see the [Juju SDK docs](https://juju.is/docs/sdk) for guidelines on enhancements to this charm following best practice guidelines, and [CONTRIBUTING.md](CONTRIBUTING.md) for developer guidance.
 
 ## License
+
 The Charmed DataHub K8s Operator is free software, distributed under the Apache Software License, version 2.0. See [License](LICENSE) for more details.
