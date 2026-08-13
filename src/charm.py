@@ -306,6 +306,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The `update-status` event that is triggered at regular intervals.
         """
+        self._refresh_ingress_addresses()
+
         try:
             self._check_state()
         except (exceptions.UnreadyStateError, exceptions.ImproperSecretError) as err:
@@ -362,6 +364,18 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
             self.reconcile()
+
+    def _refresh_ingress_addresses(self):
+        """Republish the unit's address on every ingress relation.
+
+        The ingress library publishes the address only on relation churn, leader
+        election and charm upgrade. On K8s those all land in the first seconds of
+        a rescheduled unit's life, when Juju can still report the departed pod's
+        address; whatever gets written then is never revisited, so the ingress
+        keeps routing to a dead IP.
+        """
+        self.frontend_ingress.provide_ingress_requirements(port=literals.FRONTEND_PORT)
+        self.gms_ingress.provide_ingress_requirements(port=literals.GMS_PORT)
 
     def _reconcile_trino_if_ready(self):
         """Run Trino ingestion reconciliation if preconditions are met."""
