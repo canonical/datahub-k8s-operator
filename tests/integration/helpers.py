@@ -433,6 +433,37 @@ def get_first_proxied_url(juju: jubilant.Juju, traefik_app: str) -> str:
     raise ValueError(f"No requirer URL found in {traefik_app} proxied-endpoints: {endpoints}")
 
 
+def wait_for_https_proxied_url(
+    juju: jubilant.Juju, traefik_app: str, *, timeout: float = 300, delay: float = 10
+) -> str:
+    """Return a Traefik app's proxied URL once it is served over HTTPS.
+
+    Traefik stays ``active`` while serving plain HTTP, so reaching ``active`` after
+    a ``certificates`` relation is added does not mean TLS has been applied yet.
+    Poll rather than sampling the URL once.
+
+    Args:
+        juju: Jubilant object.
+        traefik_app: Traefik app name.
+        timeout: Maximum seconds to wait for the URL to become HTTPS.
+        delay: Seconds between polls.
+
+    Returns:
+        The HTTPS URL published by the Traefik app.
+
+    Raises:
+        AssertionError: If the URL is still not HTTPS when the timeout expires.
+    """
+    url = ""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        url = get_first_proxied_url(juju, traefik_app)
+        if url.startswith("https://"):
+            return url
+        time.sleep(delay)
+    raise AssertionError(f"{traefik_app} URL still plain http after {timeout}s: {url}")
+
+
 def deploy_oauth_integrator(juju: jubilant.Juju) -> None:
     """Deploy oauth-external-idp-integrator with stub IdP config, if not present.
 
