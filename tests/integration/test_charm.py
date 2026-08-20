@@ -201,11 +201,10 @@ def test_oauth_blocks_without_https_then_recovers(full_stack: jubilant.Juju):
 
         logger.info("Verifying both traefiks now publish HTTPS URLs")
         for traefik in helpers.INGRESS_APPS:
-            url = helpers.get_first_proxied_url(juju, traefik)
-            assert url.startswith("https://"), f"{traefik} URL still plain http: {url}"
+            helpers.wait_for_https_proxied_url(juju, traefik)
 
         logger.info("Verifying the frontend redirects /sso to the IdP authorization endpoint")
-        fe_url = helpers.get_first_proxied_url(juju, helpers.INGRESS_FRONTEND_NAME)
+        fe_url = helpers.wait_for_https_proxied_url(juju, helpers.INGRESS_FRONTEND_NAME)
         sso_url = f"{fe_url.rstrip('/')}/sso"
         location = ""
         for _ in range(30):

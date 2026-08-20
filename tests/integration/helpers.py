@@ -20,22 +20,17 @@ APP_NAME = METADATA["name"]
 
 KAFKA_NAME = "kafka"
 KAFKA_CHANNEL = "3/stable"
-KAFKA_REVISION = 195
 KAFKA_OFFER_NAME = "kafka-client"
 OPENSEARCH_NAME = "opensearch"
 OPENSEARCH_CHANNEL = "2/stable"
-OPENSEARCH_REVISION = 168
 OPENSEARCH_OFFER_NAME = "os-client"
 POSTGRES_NAME = "postgresql"
 POSTGRES_CHANNEL = "14/stable"
-POSTGRES_REVISION = 553
 POSTGRES_OFFER_NAME = "pg-client"
 CERTIFICATES_NAME = "self-signed-certificates"
 CERTIFICATES_CHANNEL = "latest/stable"
-CERTIFICATES_REVISION = 264
 ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
-ZOOKEEPER_REVISION = 149
 INGRESS_CHARM = "traefik-k8s"
 INGRESS_CHANNEL = "latest/stable"
 INGRESS_FRONTEND_NAME = "traefik-frontend"
@@ -212,11 +207,11 @@ def deploy_lxd_dependencies(lxd_juju: jubilant.Juju) -> None:
     Args:
         lxd_juju: Jubilant object for the LXD model.
     """
-    lxd_juju.deploy(KAFKA_NAME, channel=KAFKA_CHANNEL, revision=KAFKA_REVISION)
-    lxd_juju.deploy(OPENSEARCH_NAME, channel=OPENSEARCH_CHANNEL, num_units=2, revision=OPENSEARCH_REVISION)
-    lxd_juju.deploy(POSTGRES_NAME, channel=POSTGRES_CHANNEL, revision=POSTGRES_REVISION)
-    lxd_juju.deploy(CERTIFICATES_NAME, channel=CERTIFICATES_CHANNEL, revision=CERTIFICATES_REVISION)
-    lxd_juju.deploy(ZOOKEPER_NAME, channel=ZOOKEEPER_CHANNEL, revision=ZOOKEEPER_REVISION)
+    lxd_juju.deploy(KAFKA_NAME, channel=KAFKA_CHANNEL)
+    lxd_juju.deploy(OPENSEARCH_NAME, channel=OPENSEARCH_CHANNEL, num_units=2)
+    lxd_juju.deploy(POSTGRES_NAME, channel=POSTGRES_CHANNEL)
+    lxd_juju.deploy(CERTIFICATES_NAME, channel=CERTIFICATES_CHANNEL)
+    lxd_juju.deploy(ZOOKEPER_NAME, channel=ZOOKEEPER_CHANNEL)
 
     logger.info("Waiting for LXD dependencies to settle")
     wait_for_apps_status(
@@ -436,6 +431,37 @@ def get_first_proxied_url(juju: jubilant.Juju, traefik_app: str) -> str:
         if isinstance(value, dict) and "url" in value:
             return value["url"]
     raise ValueError(f"No requirer URL found in {traefik_app} proxied-endpoints: {endpoints}")
+
+
+def wait_for_https_proxied_url(
+    juju: jubilant.Juju, traefik_app: str, *, timeout: float = 300, delay: float = 10
+) -> str:
+    """Return a Traefik app's proxied URL once it is served over HTTPS.
+
+    Traefik stays ``active`` while serving plain HTTP, so reaching ``active`` after
+    a ``certificates`` relation is added does not mean TLS has been applied yet.
+    Poll rather than sampling the URL once.
+
+    Args:
+        juju: Jubilant object.
+        traefik_app: Traefik app name.
+        timeout: Maximum seconds to wait for the URL to become HTTPS.
+        delay: Seconds between polls.
+
+    Returns:
+        The HTTPS URL published by the Traefik app.
+
+    Raises:
+        AssertionError: If the URL is still not HTTPS when the timeout expires.
+    """
+    url = ""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        url = get_first_proxied_url(juju, traefik_app)
+        if url.startswith("https://"):
+            return url
+        time.sleep(delay)
+    raise AssertionError(f"{traefik_app} URL still plain http after {timeout}s: {url}")
 
 
 def deploy_oauth_integrator(juju: jubilant.Juju) -> None:

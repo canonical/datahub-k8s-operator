@@ -419,6 +419,32 @@ class TestBackendProvisionedGate:
         assert services.GMSService._backend_is_provisioned(context, container) is False
 
 
+class TestWorkloadIsRunningGate:
+    """Tests for GMSService._workload_is_running (the in-flight-bootstrap gate)."""
+
+    @staticmethod
+    def _container(services_map):
+        """Return a fake container whose ``get_services`` yields ``services_map``."""
+        return SimpleNamespace(get_services=lambda name: services_map)
+
+    def test_true_when_service_running(self):
+        """Running when pebble reports the service as up."""
+        container = self._container({"datahub-gms": SimpleNamespace(is_running=lambda: True)})
+        assert services.GMSService._workload_is_running(container) is True
+
+    def test_false_when_service_stopped(self):
+        """Not running when pebble reports the service as down."""
+        container = self._container({"datahub-gms": SimpleNamespace(is_running=lambda: False)})
+        assert services.GMSService._workload_is_running(container) is False
+
+    def test_false_when_layer_not_added_yet(self):
+        """Not running on a fresh container whose layer has not been added.
+
+        This is the first-reconcile case, where the upgrade job must still run.
+        """
+        assert services.GMSService._workload_is_running(self._container({})) is False
+
+
 class TestGMSSetWorkloadVersion:
     """Tests for GMSService._set_workload_version (stateless — always tries to set)."""
 

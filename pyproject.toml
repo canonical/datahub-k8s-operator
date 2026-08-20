@@ -20,6 +20,7 @@ charmlibs-pydeps = [
     "pydantic~=2.8",
     "jsonschema~=4.23",
     "cosl>=0.0.53",
+    "cryptography>=47.0.0",
 ]
 
 # Dependencies for linting and formatting.
