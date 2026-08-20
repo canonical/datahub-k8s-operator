@@ -709,7 +709,10 @@ class GMSService(AbstractService):
 
         Statelessness note: steps 1, 2 and 4 are one-time backend bootstrap, gated
         on `_backend_is_provisioned` — a query against the backend's own state (the
-        root auth policy in `metadata_aspect_v2`), not on workload liveness. This
+        root auth policy in `metadata_aspect_v2`), not on workload liveness. Step 4
+        carries a second gate: the marker lands minutes after the upgrade job
+        returns, so it is skipped while GMS is already running and finishing that
+        bootstrap, rather than being restarted from the top on every reconcile. This
         runs the bootstrap on a fresh backend (so authenticated GraphQL works) and
         skips the JVM-heavy upgrade on a rebuilt pod whose backends are intact.
         The truststore import (step 3) is exempt: it is cheap and must self-heal
@@ -747,9 +750,38 @@ class GMSService(AbstractService):
 
         if not backend_provisioned and is_leader:
             # Step 4: DataHub upgrade (SystemUpdate)
-            cls._run_upgrade(context, container)
+            #
+            # The provisioning marker is only written once GMS has finished booting
+            # and run its own bootstrap steps, few minutes after the upgrade job
+            # returns. Any reconcile landing in that gap sees "not provisioned"
+            # again, so gating solely on the marker re-runs this JVM-heavy job while
+            # the previous bootstrap is still in flight. If GMS is already running,
+            # that bootstrap is underway: leave it alone and let the marker appear.
+            if cls._workload_is_running(container):
+                logger.info(
+                    "Backend not marked as provisioned yet, but '%s' is already running; "
+                    "skipping the upgrade job to let the in-flight bootstrap finish",
+                    cls.name,
+                )
+            else:
+                cls._run_upgrade(context, container)
 
         return True
+
+    @classmethod
+    def _workload_is_running(cls, container) -> bool:
+        """Return True when this service's pebble service is up.
+
+        Args:
+            container: The service's container reference.
+
+        Returns:
+            Whether pebble reports the service as running.
+        """
+        # `get_services` filters by name and simply omits anything absent, so a
+        # container whose layer has not been added yet returns an empty mapping.
+        service = container.get_services(cls.name).get(cls.name)
+        return bool(service and service.is_running())
 
     @classmethod
     def _backend_is_provisioned(cls, context: ServiceContext, container) -> bool:
@@ -927,9 +959,10 @@ class GMSService(AbstractService):
             InitializationFailedError: If the initialization fails.
         """
         # SystemUpdate is the JVM-heavy bootstrap. The caller gates it on
-        # `_backend_is_provisioned` so it runs against a fresh backend rather than
-        # on every reconcile. SystemUpdate is itself idempotent, so re-running on a
-        # not-yet-marked backend is safe.
+        # `_backend_is_provisioned` and on GMS not already running, so it runs
+        # against a fresh backend rather than on every reconcile. SystemUpdate is
+        # itself idempotent, so re-running on a not-yet-marked backend is safe
+        # but it is expensive and competes with a booting GMS, hence the gates.
         logger.info("Running datahub-upgrade job")
         environment = cls._compile_upgrade_environment(context)
         try:
