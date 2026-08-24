@@ -17,6 +17,7 @@ jobs:
       contents: read
       packages: write
     with:
+      runs-on: "self-hosted-linux-amd64-noble-xlarge"
       provider: "k8s"
       channel: "1.32-classic/stable"
       use-canonical-k8s: true
@@ -29,5 +30,4 @@ jobs:
         "test_upgrade.py",
         "test_scaling.py",
         "test_trino_catalog.py"]
-      self-hosted-runner: false
       with-uv: true
