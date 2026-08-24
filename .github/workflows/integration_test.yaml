@@ -30,4 +30,5 @@ jobs:
         "test_upgrade.py",
         "test_scaling.py",
         "test_trino_catalog.py"]
+      self-hosted-runner: false
       with-uv: true
