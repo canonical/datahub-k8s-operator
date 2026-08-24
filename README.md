@@ -245,23 +245,20 @@ juju config datahub-k8s trino-patterns='{"schema-pattern":{"allow":[".*"],"deny"
 
 The option is a string for a JSON object that allows setting up allow and deny patterns for each of schema, table, and views.
 
-The charm creates one ingestion source per Trino catalog with names prefixed by `[juju]`.
+The relation only bootstraps ingestions; it never takes them away. On every reconciliation (triggered by relation changes), the charm:
+- Creates one ingestion source per Trino catalog that does not have one yet, with names prefixed by `[juju]`.
+- Refreshes the Trino host, username, and password of the ingestion sources it already created, along with the HTTP/S proxy variables derived from the model config.
+- Deletes nothing, ever.
 
-On every reconciliation (triggered by relation changes), the charm will overwrite the following fields in each managed ingestion source:
-- Access tokens (stored as DataHub secrets)
-- Trino credentials (username and password, stored as DataHub secrets)
-- Trino host, port, and catalog name
-- HTTP/S proxy variables derived from the model config
+The full recipe of a new ingestion source is built from the `trino-patterns` config option and a random daily schedule (between 22:00 and 06:00 UTC). On subsequent reconciliations, only the three connection fields are rewritten; the rest of the recipe (filter patterns, environment, sink, profiling, anything else the operator added) and the rest of the source definition (schedule, executor, CLI version, debug mode, other extra arguments) are sent back to DataHub unchanged. Credentials themselves live in DataHub secrets that the recipe references, so rotating them does not touch the recipe.
 
-The following are set only during the initial creation of an ingestion source and preserved on subsequent updates:
-- Filter patterns from the `trino-patterns` config option
-- A random daily schedule (between 22:00 and 06:00 UTC)
+Recipes edited through the DataHub UI are stored as YAML (the UI submits its editor contents unconverted), while the charm writes JSON when it first creates a source. The charm reads both and writes each one back in the language it arrived in. Comments and indentation do not survive a round trip, so an edited recipe is reformatted the next time the Trino host or credentials actually change.
 
-Because patterns are only applied on creation, they can be freely customized via the DataHub UI afterwards. To change the default patterns used for new ingestion sources, update the `trino-patterns` charm config.
+The proxy variables are the one exception outside the recipe: they live in the ingestion source's `extra_env_vars`, which is the environment the executor runs in rather than ingestion configuration, so the charm keeps them in step with the model config. Changing `juju-http-proxy` and friends propagates to existing ingestion sources, and unsetting them removes the variables. Any other variable in that blob is left alone.
 
-The schedule, description, executor, and any non-managed extra arguments can be freely updated via the DataHub UI without interference from the charm.
+This means an ingestion source can be freely customized via the DataHub UI without the charm overriding those changes. To change the defaults used for *new* ingestion sources, update the `trino-patterns` charm config.
 
-When a catalog is removed from the Trino relation, its corresponding ingestion source is automatically deleted. When the relation is fully broken, all Juju-managed ingestion sources are cleaned up. Note that cleaning the ingestions does not remove already ingested metadata.
+Removing a catalog from the relation, or removing the relation altogether, leaves the ingestion sources and their DataHub secrets in place. That way a redeployment that drops the relation does not destroy the operator's work: when the relation comes back, the existing ingestion sources are reused as-is rather than recreated with default recipes. The trade-off is that ingestion sources for catalogs that are gone for good go stale and have to be deleted by hand from the DataHub UI.
 
 #### Managed Resource Naming Conventions
 
@@ -271,7 +268,7 @@ The charm creates the following resources in DataHub, identifiable by their nami
 - **Per-catalog password secrets**: Named `JUJU_MANAGED_TRINO_PASSWORD_<NORMALIZED_CATALOG>`, where the catalog name is uppercased and non-alphanumeric characters are replaced with `_` (e.g. catalog `my-catalog.test` becomes `JUJU_MANAGED_TRINO_PASSWORD_MY_CATALOG_TEST`).
 - **GMS access token secret**: Named `JUJU_MANAGED_GMS_TOKEN`.
 
-When a catalog is removed or the Trino relation is broken, the corresponding ingestion sources and secrets are automatically deleted. User-created secrets and ingestion sources are not affected if they do not match the charm conventions.
+The charm never deletes these resources; stale ones are removed by hand. User-created secrets and ingestion sources are not affected if they do not match the charm conventions.
 
 ### Serving the API to other charms
 

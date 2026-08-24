@@ -9,8 +9,9 @@ import os
 import random
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+import yaml
 from charms.trino_k8s.v0.trino_catalog import (
     TrinoCatalogRequirer,  # pylint: disable=E0611
 )
@@ -27,6 +28,7 @@ INGESTION_NAME_PREFIX = "[juju] "
 INGESTION_NAME_SUFFIX = "-ingestion"
 GMS_TOKEN_SECRET_NAME = "JUJU_MANAGED_GMS_TOKEN"  # nosec B105
 TRINO_PASSWORD_SECRET_PREFIX = "JUJU_MANAGED_TRINO_PASSWORD_"  # nosec B105
+PROXY_ENV_KEYS = ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy")
 
 
 @dataclass
@@ -121,35 +123,6 @@ def _build_managed_extra_args() -> List[Dict[str, str]]:
     return [{"key": "extra_env_vars", "value": json.dumps(env_vars)}]
 
 
-def _extract_patterns(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Extract filter patterns from an existing ingestion source's recipe.
-
-    Args:
-        source: Ingestion source dict from the GraphQL response.
-
-    Returns:
-        Patterns dict with keys like "schema-pattern", or None if not parseable.
-    """
-    recipe_str = source.get("config", {}).get("recipe")
-    if not recipe_str:
-        return None
-    try:
-        recipe = json.loads(recipe_str)
-    except (json.JSONDecodeError, TypeError):
-        return None
-    config = recipe.get("source", {}).get("config", {})
-    key_map = {
-        "schema_pattern": "schema-pattern",
-        "table_pattern": "table-pattern",
-        "view_pattern": "view-pattern",
-    }
-    patterns = {}
-    for recipe_key, pattern_key in key_map.items():
-        if recipe_key in config:
-            patterns[pattern_key] = config[recipe_key]
-    return patterns or None
-
-
 def _normalize_secret_name(catalog_name: str) -> str:
     """Build a DataHub secret name for a catalog's Trino password.
 
@@ -184,12 +157,11 @@ def _is_https(trino_url: str) -> bool:
         return False
 
 
-def _build_recipe(
-    catalog_name: str,
-    params: "_IngestionParams",
-    patterns_override: Optional[Dict[str, Any]] = None,
-) -> str:
-    """Build a DataHub ingestion recipe YAML string for a Trino catalog.
+def _build_recipe(catalog_name: str, params: "_IngestionParams") -> str:
+    """Build a DataHub ingestion recipe for a Trino catalog.
+
+    Only used when an ingestion source is first created; existing sources
+    keep whatever recipe the operator has since put in place.
 
     Credentials are referenced via DataHub-managed secret placeholders
     so that raw values are never stored in the recipe.
@@ -197,13 +169,12 @@ def _build_recipe(
     Args:
         catalog_name: Trino catalog name (used as the database field).
         params: Common ingestion parameters.
-        patterns_override: If provided, use these patterns instead of params.trino_patterns.
 
     Returns:
         JSON-encoded recipe string.
     """
     default_pattern = {"allow": [".*"], "deny": []}
-    patterns = patterns_override if patterns_override is not None else params.trino_patterns
+    patterns = params.trino_patterns
     source_config = {
         "host_port": params.trino_url,
         "database": catalog_name,
@@ -294,65 +265,197 @@ def _create_ingestion_source(
     return graphql.create_ingestion_source(bearer_token, input_data)
 
 
+def _apply_connection_fields(
+    source_config: Dict[str, Any],
+    catalog_name: str,
+    params: "_IngestionParams",
+) -> bool:
+    """Set the charm-owned connection fields on a recipe's source config.
+
+    These three fields (host, user, password) are the only part of an existing
+    recipe the charm owns; everything else is left exactly as the operator
+    left it.
+
+    Args:
+        source_config: The "source.config" mapping of the recipe, modified in place.
+        catalog_name: Trino catalog name, used to resolve the password secret.
+        params: Common ingestion parameters.
+
+    Returns:
+        True if any field was changed, False if the config was already current.
+    """
+    changed = False
+    for key, value in (("host_port", params.trino_url), ("username", params.username)):
+        if source_config.get(key) != value:
+            source_config[key] = value
+            changed = True
+
+    # Password only works over HTTPS; omit it for plain HTTP connections.
+    if _is_https(params.trino_url):
+        password_ref = f"${{{_normalize_secret_name(catalog_name)}}}"
+        if source_config.get("password") != password_ref:
+            source_config["password"] = password_ref
+            changed = True
+    elif "password" in source_config:
+        del source_config["password"]
+        changed = True
+
+    return changed
+
+
+def _parse_recipe(recipe_str: str) -> Tuple[Optional[Dict[str, Any]], bool]:
+    """Parse a recipe string, which DataHub stores as either JSON or YAML.
+
+    The charm writes JSON when it creates a source, but the DataHub UI submits
+    whatever the operator typed into its YAML editor, unconverted, so an edited
+    recipe comes back as YAML. JSON is valid YAML and so one parser covers
+    both; the format is reported back so the recipe can be written out in the
+    language it arrived in.
+
+    Args:
+        recipe_str: The stored recipe string.
+
+    Returns:
+        Tuple of (recipe mapping, True if it was JSON). The mapping is None if
+        the recipe is not a parseable mapping in either language.
+    """
+    is_json = True
+    try:
+        recipe = json.loads(recipe_str)
+    except (json.JSONDecodeError, TypeError):
+        is_json = False
+        try:
+            recipe = yaml.safe_load(recipe_str)
+        except yaml.YAMLError:
+            return None, False
+    if not isinstance(recipe, dict):
+        return None, is_json
+    return recipe, is_json
+
+
+def _dump_recipe(recipe: Dict[str, Any], is_json: bool) -> str:
+    """Serialise a recipe back into the language it was stored in.
+
+    Args:
+        recipe: The patched recipe mapping.
+        is_json: Whether the stored recipe was JSON.
+
+    Returns:
+        The serialised recipe string.
+    """
+    if is_json:
+        return json.dumps(recipe)
+    return yaml.safe_dump(recipe, sort_keys=False)
+
+
+def _apply_managed_env_vars(extra_args: List[Dict[str, str]]) -> bool:
+    """Reconcile the Juju-managed marker and proxy variables of an extraArgs list.
+
+    The extra_env_vars blob is the executor's environment rather than part of
+    the recipe, so the charm keeps owning the proxy variables it derives from
+    the model config: they are set, and dropped again once the model config no
+    longer defines them. Any other entry, and any other variable inside the
+    blob, is left as the operator set it.
+
+    Args:
+        extra_args: The source's extraArgs entries, modified in place.
+
+    Returns:
+        True if any variable was changed, False if they were already current.
+    """
+    desired = _compile_extra_env_vars()
+    for entry in extra_args:
+        if entry.get("key") != "extra_env_vars":
+            continue
+        try:
+            env_vars = json.loads(entry.get("value") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            env_vars = {}
+        updated = {**env_vars, **desired}
+        for key in PROXY_ENV_KEYS:
+            if key not in desired:
+                updated.pop(key, None)
+        if updated == env_vars:
+            return False
+        entry["value"] = json.dumps(updated)
+        return True
+    return False
+
+
 def _update_ingestion_source(
     bearer_token: str,
     urn: str,
     existing_source: Dict[str, Any],
     params: "_IngestionParams",
-) -> None:
-    """Update credentials and proxy vars of an existing ingestion source.
+) -> bool:
+    """Refresh the Juju-managed fields of an existing ingestion source.
 
-    Preserves name, type, description, schedule, patterns, and other settings.
+    Only the host, username and password reference of the recipe are touched,
+    plus the proxy variables in the executor environment. Every other part of
+    the recipe (patterns, environment, sink, stateful ingestion, any operator
+    addition) and every other part of the source definition (name, schedule,
+    executor, CLI version, debug mode, other extra args) is sent back
+    unchanged, so operator edits survive reconciliation. The recipe is written
+    back in the language it was stored in; comments and formatting do not
+    survive the round trip.
 
     Args:
         bearer_token: Bearer token for authentication.
         urn: URN of the existing ingestion source.
         existing_source: Current source dict from listIngestionSources.
         params: Common ingestion parameters.
+
+    Returns:
+        True if an update was sent, False if the source was already current
+        or its recipe could not be safely patched.
     """
-    existing_patterns = _extract_patterns(existing_source)
-    recipe = _build_recipe(
-        _extract_catalog_from_name(existing_source["name"]),
-        params,
-        patterns_override=existing_patterns,
-    )
+    name = existing_source["name"]
+    config = existing_source.get("config") or {}
+    recipe_str = config.get("recipe")
+    if not recipe_str:
+        logger.warning("Ingestion source '%s' has no recipe, leaving it untouched", name)
+        return False
 
-    # Preserve non-managed extraArgs; replace the managed extra_env_vars block atomically.
-    existing_extra = existing_source.get("config", {}).get("extraArgs") or []
-    managed_keys = {
-        JUJU_MANAGED_KEY,
-        "extra_env_vars",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
+    recipe, is_json = _parse_recipe(recipe_str)
+    if recipe is None:
+        logger.warning("Recipe of ingestion source '%s' is not parseable, leaving it untouched", name)
+        return False
+
+    source_config = recipe.get("source", {}).get("config") if isinstance(recipe.get("source"), dict) else None
+    if not isinstance(source_config, dict):
+        logger.warning("Recipe of ingestion source '%s' has no source config, leaving it untouched", name)
+        return False
+
+    extra_args = [{"key": arg["key"], "value": arg["value"]} for arg in config.get("extraArgs") or []]
+    # Both are evaluated: each owns a different part of the source.
+    recipe_changed = _apply_connection_fields(source_config, _extract_catalog_from_name(name), params)
+    env_changed = _apply_managed_env_vars(extra_args)
+    if not recipe_changed and not env_changed:
+        return False
+
+    config_input: Dict[str, Any] = {
+        "recipe": _dump_recipe(recipe, is_json),
+        "executorId": config.get("executorId") or literals.DEFAULT_EXECUTOR_ID,
+        "extraArgs": extra_args,
     }
-    preserved = [a for a in existing_extra if a.get("key") not in managed_keys]
-    preserved.extend(_build_managed_extra_args())
-
-    existing_schedule = existing_source.get("schedule")
-    schedule_input = None
-    if existing_schedule:
-        schedule_input = {
-            "interval": existing_schedule["interval"],
-            "timezone": existing_schedule.get("timezone", "UTC"),
-        }
+    for key in ("version", "debugMode"):
+        if config.get(key) is not None:
+            config_input[key] = config[key]
 
     input_data: Dict[str, Any] = {
-        "name": existing_source["name"],
+        "name": name,
         "type": existing_source.get("type", "trino"),
-        "config": {
-            "recipe": recipe,
-            "executorId": existing_source.get("config", {}).get("executorId", literals.DEFAULT_EXECUTOR_ID),
-            "extraArgs": preserved,
-        },
+        "config": config_input,
     }
-    if schedule_input:
-        input_data["schedule"] = schedule_input
+    schedule = existing_source.get("schedule")
+    if schedule:
+        input_data["schedule"] = {
+            "interval": schedule["interval"],
+            "timezone": schedule.get("timezone", "UTC"),
+        }
 
     graphql.update_ingestion_source(bearer_token, urn, input_data)
+    return True
 
 
 def _extract_catalog_from_name(name: str) -> str:
@@ -477,17 +580,30 @@ class TrinoRelation(framework.Object):
     def _on_relation_broken(self, event) -> None:
         """Handle broken relations with Trino.
 
+        Ingestion sources and their secrets are deliberately left in place: a
+        relation removed during a redeployment must not take the operator's
+        ingestions with it. Sources for catalogs that are gone for good go
+        stale and are removed by hand.
+
         Args:
             event: The event triggered when the relation is broken.
         """
         if not self.charm.unit.is_leader():
             return
 
-        self._cleanup_managed_ingestions()
+        logger.info(
+            "Trino relation broken (id=%s), Juju-managed ingestion sources are left intact",
+            event.relation.id,
+        )
         self.charm.reconcile()
 
     def reconcile_ingestions(self) -> None:
-        """Reconcile Juju-managed Trino ingestion sources with current relation state."""
+        """Reconcile Juju-managed Trino ingestion sources with current relation state.
+
+        The relation only bootstraps ingestions: one is created per catalog if
+        it does not exist yet, existing ones have their Trino connection
+        details and proxy variables refreshed, and none is ever deleted.
+        """
         trino_info = self.trino_catalog.get_trino_info()
         if not trino_info:
             logger.info("No Trino info available, skipping reconciliation")
@@ -509,7 +625,7 @@ class TrinoRelation(framework.Object):
         result = self._prepare_ingestion_state(catalogs, password)
         if result is None:
             return
-        access_token, managed, secrets_map = result
+        access_token, managed = result
 
         existing_by_catalog: Dict[str, Dict[str, Any]] = {}
         for source in managed:
@@ -526,7 +642,6 @@ class TrinoRelation(framework.Object):
 
         self._create_missing_ingestions(desired_catalogs, existing_by_catalog, access_token, params)
         self._update_existing_ingestions(desired_catalogs, existing_by_catalog, access_token, params)
-        self._delete_obsolete_ingestions(desired_catalogs, existing_by_catalog, access_token, secrets_map)
 
     def _prepare_ingestion_state(self, catalogs, password: str) -> Optional[tuple]:
         """Ensure secrets exist and fetch managed ingestion sources, retrying on auth failure.
@@ -536,7 +651,7 @@ class TrinoRelation(framework.Object):
             password: Current Trino password for per-catalog secrets.
 
         Returns:
-            Tuple of (access_token, managed_sources, secrets_map) or None on failure.
+            Tuple of (access_token, managed_sources) or None on failure.
         """
         for attempt in range(2):
             try:
@@ -547,7 +662,7 @@ class TrinoRelation(framework.Object):
                     graphql.ensure_secret(access_token, _normalize_secret_name(catalog.name), password, secrets_map)
                 all_sources = graphql.list_ingestion_sources(access_token)
                 managed = _filter_juju_managed(all_sources)
-                return access_token, managed, secrets_map
+                return access_token, managed
             except graphql.AuthenticationError:
                 if attempt == 0:
                     logger.info("Authentication failed, refreshing token and retrying")
@@ -593,66 +708,13 @@ class TrinoRelation(framework.Object):
         bearer: str,
         params: "_IngestionParams",
     ) -> None:
-        """Update ingestion sources whose catalogs are still desired."""
+        """Refresh the Juju-managed fields of ingestions for related catalogs."""
         for catalog_name in desired & set(existing.keys()):
             source = existing[catalog_name]
             try:
-                _update_ingestion_source(
-                    bearer,
-                    source["urn"],
-                    source,
-                    params,
-                )
-                logger.info("Updated ingestion source for catalog '%s'", catalog_name)
+                if _update_ingestion_source(bearer, source["urn"], source, params):
+                    logger.info("Refreshed Juju-managed fields of ingestion for catalog '%s'", catalog_name)
+                else:
+                    logger.debug("Ingestion for catalog '%s' is up to date, skipping", catalog_name)
             except Exception as e:
                 logger.error("Failed to update ingestion for catalog '%s': %s", catalog_name, str(e))
-
-    def _delete_obsolete_ingestions(
-        self,
-        desired: Set[str],
-        existing: Dict[str, Dict[str, Any]],
-        bearer: str,
-        secrets_map: Dict[str, str],
-    ) -> None:
-        """Delete ingestion sources and their secrets for catalogs no longer in the relation."""
-        for catalog_name in set(existing.keys()) - desired:
-            source = existing[catalog_name]
-            try:
-                graphql.delete_ingestion_source(bearer, source["urn"])
-                logger.info("Deleted obsolete ingestion source for catalog '%s'", catalog_name)
-            except Exception as e:
-                logger.error("Failed to delete ingestion for catalog '%s': %s", catalog_name, str(e))
-            secret_name = _normalize_secret_name(catalog_name)
-            secret_urn = secrets_map.get(secret_name)
-            if secret_urn:
-                try:
-                    graphql.delete_secret(bearer, secret_urn)
-                    logger.info("Deleted secret '%s' for catalog '%s'", secret_name, catalog_name)
-                except Exception as e:
-                    logger.error("Failed to delete secret for catalog '%s': %s", catalog_name, str(e))
-
-    def _cleanup_managed_ingestions(self) -> None:
-        """Delete all Juju-managed Trino ingestion sources and secrets (relation-broken cleanup)."""  # noqa W505
-        try:
-            access_token = self.access_token
-            all_sources = graphql.list_ingestion_sources(access_token)
-            managed = _filter_juju_managed(all_sources)
-            secrets_map = graphql.list_secrets(access_token)
-        except Exception as e:
-            logger.error("Failed to fetch ingestion sources during cleanup: %s", str(e))
-            return
-
-        for source in managed:
-            try:
-                graphql.delete_ingestion_source(access_token, source["urn"])
-                logger.info("Cleaned up ingestion source '%s'", source["name"])
-            except Exception as e:
-                logger.error("Failed to clean up ingestion '%s': %s", source["name"], str(e))
-
-        for secret_name, secret_urn in secrets_map.items():
-            if secret_name == GMS_TOKEN_SECRET_NAME or secret_name.startswith(TRINO_PASSWORD_SECRET_PREFIX):
-                try:
-                    graphql.delete_secret(access_token, secret_urn)
-                    logger.info("Cleaned up secret '%s'", secret_name)
-                except Exception as e:
-                    logger.error("Failed to clean up secret '%s': %s", secret_name, str(e))

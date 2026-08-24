@@ -287,6 +287,8 @@ def list_ingestion_sources(bearer_token: str) -> List[Dict[str, Any]]:
                     config {
                         recipe
                         executorId
+                        version
+                        debugMode
                         extraArgs {
                             key
                             value
