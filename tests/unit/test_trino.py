@@ -490,7 +490,7 @@ class TestConnectionRefresh:
                     "host_port": "old-trino:443",
                     "database": "sales",
                     "username": "old-user",
-                    "password": "${JUJU_MANAGED_TRINO_PASSWORD_SALES}",
+                    "password": "${JUJU_MANAGED_TRINO_PASSWORD_SALES}",  # nosec B105
                     "schema_pattern": {"allow": ["finance"], "deny": []},
                     "profiling": {"enabled": True},
                     "env": "DEV",
