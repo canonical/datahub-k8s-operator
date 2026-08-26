@@ -27,7 +27,7 @@ description: |
   component of the Canonical Data Mesh solution.
 
 links:
-  documentation: https://github.com/canonical/canonical-data-mesh-docs
+  documentation: https://canonical-data-mesh-documentation.readthedocs-hosted.com/en/latest/
   source: 
     - https://github.com/canonical/datahub-k8s-operator
   issues: 

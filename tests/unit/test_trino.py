@@ -8,6 +8,9 @@ import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+import yaml
+
 import literals
 from graphql import AuthenticationError
 from relations.trino import (
@@ -25,7 +28,14 @@ from relations.trino import (
     _is_https,
     _normalize_secret_name,
     _random_daily_schedule,
+    _update_ingestion_source,
 )
+
+NO_PROXY_ENV: dict = {}
+PROXY_ENV = {
+    "JUJU_CHARM_HTTP_PROXY": "http://proxy:8080",
+    "JUJU_CHARM_HTTPS_PROXY": "http://proxy:8443",
+}
 
 
 class TestHelpers:
@@ -371,10 +381,10 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
     @patch("graphql.list_ingestion_sources")
     @patch("graphql.ensure_secret")
     @patch("graphql.list_secrets")
-    def test_reconcile_deletes_obsolete(
+    def test_reconcile_never_deletes(
         self, mock_ls, _mock_es, mock_list, mock_create, mock_update, mock_delete, mock_delete_secret
     ):
-        """Reconcile deletes ingestion and secrets for catalogs no longer in relation."""
+        """Reconcile leaves ingestions and secrets of catalogs no longer in the relation alone."""
         rel = self._make_relation()
         rel.trino_catalog.get_trino_info.return_value = {
             "trino_url": "trino:443",
@@ -396,8 +406,8 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
 
         mock_create.assert_not_called()
         mock_update.assert_not_called()
-        mock_delete.assert_called_once_with("test-token", "urn:old")
-        mock_delete_secret.assert_called_once_with("test-token", "urn:secret:legacy")
+        mock_delete.assert_not_called()
+        mock_delete_secret.assert_not_called()
 
     @patch("graphql.delete_secret")
     @patch("graphql.delete_ingestion_source")
@@ -423,42 +433,290 @@ class TestReconciliation:  # pylint: disable=too-many-positional-arguments
 
     @patch("graphql.delete_secret")
     @patch("graphql.delete_ingestion_source")
-    @patch("graphql.list_secrets")
-    @patch("graphql.list_ingestion_sources")
-    def test_cleanup_deletes_all_managed(self, mock_list, mock_list_secrets, mock_delete, mock_delete_secret):
-        """Cleanup on relation-broken deletes all Juju-managed sources and secrets."""
+    def test_relation_broken_keeps_everything(self, mock_delete, mock_delete_secret):
+        """A broken relation leaves every Juju-managed source and secret in place."""
         rel = self._make_relation()
-        mock_list.return_value = [
-            {
-                "urn": "urn:a",
-                "name": "[juju] a-ingestion",
+        event = MagicMock()
+
+        rel._on_relation_broken(event)
+
+        mock_delete.assert_not_called()
+        mock_delete_secret.assert_not_called()
+        rel.charm.reconcile.assert_called_once()
+
+
+class TestConnectionRefresh:
+    """Tests for the create-once, refresh-connection-only update logic."""
+
+    def _params(self, trino_url="trino:443", username="user"):
+        """Build ingestion params for the given connection details."""
+        default_pattern = {"allow": [".*"], "deny": []}
+        return _IngestionParams(
+            trino_url=trino_url,
+            username=username,
+            password="pass",  # nosec
+            access_token="tok123",
+            trino_patterns={
+                "schema-pattern": default_pattern,
+                "table-pattern": default_pattern,
+                "view-pattern": default_pattern,
+            },
+        )
+
+    def _source(self, recipe, **overrides):
+        """Build an existing ingestion source dict around the given recipe."""
+        source = {
+            "urn": "urn:sales",
+            "name": "[juju] sales-ingestion",
+            "type": "trino",
+            "config": {
+                "recipe": json.dumps(recipe),
+                "executorId": literals.DEFAULT_EXECUTOR_ID,
+                "version": "",
+                "debugMode": False,
+                "extraArgs": [{"key": "extra_env_vars", "value": json.dumps({JUJU_MANAGED_KEY: "true"})}],
+            },
+            "schedule": {"interval": "15 23 * * *", "timezone": "UTC"},
+        }
+        source.update(overrides)
+        return source
+
+    def _operator_recipe(self):
+        """Build a recipe as an operator may have customised it in the UI."""
+        return {
+            "source": {
+                "type": "trino",
                 "config": {
-                    "extraArgs": [
-                        {
-                            "key": "extra_env_vars",
-                            "value": json.dumps({JUJU_MANAGED_KEY: "true"}),
-                        }
-                    ]
+                    "host_port": "old-trino:443",
+                    "database": "sales",
+                    "username": "old-user",
+                    "password": "${JUJU_MANAGED_TRINO_PASSWORD_SALES}",  # nosec B105
+                    "schema_pattern": {"allow": ["finance"], "deny": []},
+                    "profiling": {"enabled": True},
+                    "env": "DEV",
                 },
             },
+            "sink": {"type": "datahub-rest", "config": {"server": "http://localhost:8080"}},
+        }
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_only_touches_connection_fields(self, mock_update):
+        """Only host, user and password change; every operator edit is preserved."""
+        source = self._source(self._operator_recipe())
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is True
+
+        _, urn, input_data = mock_update.call_args[0]
+        assert urn == "urn:sales"
+        config = json.loads(input_data["config"]["recipe"])["source"]["config"]
+        assert config["host_port"] == "trino:443"
+        assert config["username"] == "user"
+        assert config["password"] == "${JUJU_MANAGED_TRINO_PASSWORD_SALES}"
+        # Operator customisations survive untouched.
+        assert config["schema_pattern"] == {"allow": ["finance"], "deny": []}
+        assert config["profiling"] == {"enabled": True}
+        assert config["env"] == "DEV"
+        assert json.loads(input_data["config"]["recipe"])["sink"]["config"] == {"server": "http://localhost:8080"}
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_preserves_source_definition(self, mock_update):
+        """Name, schedule, executor, version, debug mode and extra args are echoed back."""
+        source = self._source(self._operator_recipe())
+        source["schedule"] = {"interval": "15 23 * * *", "timezone": "Europe/Rome"}
+        source["config"]["executorId"] = "custom-executor"
+        source["config"]["version"] = "0.14.1"
+        source["config"]["debugMode"] = True
+        source["config"]["extraArgs"].append({"key": "operator_arg", "value": "keep"})
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            _update_ingestion_source("tok", "urn:sales", source, self._params())
+
+        input_data = mock_update.call_args[0][2]
+        assert input_data["name"] == "[juju] sales-ingestion"
+        assert input_data["type"] == "trino"
+        assert input_data["schedule"] == {"interval": "15 23 * * *", "timezone": "Europe/Rome"}
+        assert input_data["config"]["executorId"] == "custom-executor"
+        assert input_data["config"]["version"] == "0.14.1"
+        assert input_data["config"]["debugMode"] is True
+        assert {"key": "operator_arg", "value": "keep"} in input_data["config"]["extraArgs"]
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_skipped_when_connection_unchanged(self, mock_update):
+        """No mutation is sent when the connection details are already current."""
+        recipe = self._operator_recipe()
+        recipe["source"]["config"]["host_port"] = "trino:443"
+        recipe["source"]["config"]["username"] = "user"
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", self._source(recipe), self._params()) is False
+
+        mock_update.assert_not_called()
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_drops_password_over_http(self, mock_update):
+        """The password reference is removed when the connection is not HTTPS."""
+        source = self._source(self._operator_recipe())
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            _update_ingestion_source("tok", "urn:sales", source, self._params(trino_url="trino:8080"))
+
+        config = json.loads(mock_update.call_args[0][2]["config"]["recipe"])["source"]["config"]
+        assert "password" not in config
+        assert config["host_port"] == "trino:8080"
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_patches_yaml_recipe_saved_by_the_ui(self, mock_update):
+        """A recipe the operator saved through the DataHub UI is YAML, not JSON."""
+        ui_recipe = (
+            "source:\n"
+            "    type: trino\n"
+            "    config:\n"
+            "        host_port: 'old-trino:443'\n"
+            "        database: sales\n"
+            "        username: old-user\n"
+            "        password: '${JUJU_MANAGED_TRINO_PASSWORD_SALES}'\n"
+            "        schema_pattern:\n"
+            "            allow:\n"
+            "                - finance\n"
+            "sink:\n"
+            "    type: datahub-rest\n"
+            "    config:\n"
+            "        server: 'http://localhost:8080'\n"
+        )
+        source = self._source({})
+        source["config"]["recipe"] = ui_recipe
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is True
+
+        sent = mock_update.call_args[0][2]["config"]["recipe"]
+        # Written back as YAML, the language it arrived in.
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(sent)
+        config = yaml.safe_load(sent)["source"]["config"]
+        assert config["host_port"] == "trino:443"
+        assert config["username"] == "user"
+        assert config["password"] == "${JUJU_MANAGED_TRINO_PASSWORD_SALES}"
+        assert config["schema_pattern"] == {"allow": ["finance"]}
+        assert yaml.safe_load(sent)["sink"]["config"]["server"] == "http://localhost:8080"
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_keeps_json_recipe_as_json(self, mock_update):
+        """A charm-created recipe stays JSON rather than being rewritten as YAML."""
+        source = self._source(self._operator_recipe())
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            _update_ingestion_source("tok", "urn:sales", source, self._params())
+
+        sent = mock_update.call_args[0][2]["config"]["recipe"]
+        assert json.loads(sent)["source"]["config"]["host_port"] == "trino:443"
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_skips_yaml_recipe_already_current(self, mock_update):
+        """A YAML recipe with current connection details sends no mutation."""
+        ui_recipe = "source:\n  type: trino\n  config:\n    host_port: trino:443\n    username: user\n    password: '${JUJU_MANAGED_TRINO_PASSWORD_SALES}'\n"
+        source = self._source({})
+        source["config"]["recipe"] = ui_recipe
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is False
+
+        mock_update.assert_not_called()
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_skips_unparseable_recipe(self, mock_update):
+        """A recipe the charm cannot parse is left untouched rather than overwritten."""
+        source = self._source(self._operator_recipe())
+        # A scalar, not a mapping: parses as YAML but is not a usable recipe.
+        source["config"]["recipe"] = "not-a-recipe"
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is False
+
+        mock_update.assert_not_called()
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_sets_proxy_vars_and_keeps_operator_env(self, mock_update):
+        """Model proxy config lands in extra_env_vars without dropping operator vars."""
+        source = self._source(self._operator_recipe())
+        source["config"]["extraArgs"] = [
             {
-                "urn": "urn:b",
-                "name": "manual-source",
-                "config": {"extraArgs": []},
-            },
+                "key": "extra_env_vars",
+                "value": json.dumps({JUJU_MANAGED_KEY: "true", "OPERATOR_VAR": "keep"}),
+            }
         ]
-        mock_list_secrets.return_value = {
-            f"{TRINO_PASSWORD_SECRET_PREFIX}A": "urn:secret:a",
-            GMS_TOKEN_SECRET_NAME: "urn:secret:token",
-            "USER_CREATED_SECRET": "urn:secret:user",
-        }  # nosec B105
 
-        rel._cleanup_managed_ingestions()
+        with patch.dict(os.environ, PROXY_ENV, clear=True):
+            _update_ingestion_source("tok", "urn:sales", source, self._params())
 
-        mock_delete.assert_called_once_with("test-token", "urn:a")
-        assert mock_delete_secret.call_count == 2
-        mock_delete_secret.assert_any_call("test-token", "urn:secret:a")
-        mock_delete_secret.assert_any_call("test-token", "urn:secret:token")
+        env = json.loads(mock_update.call_args[0][2]["config"]["extraArgs"][0]["value"])
+        assert env["HTTP_PROXY"] == "http://proxy:8080"
+        assert env["https_proxy"] == "http://proxy:8443"
+        assert env["OPERATOR_VAR"] == "keep"
+        assert env[JUJU_MANAGED_KEY] == "true"
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_removes_proxy_vars_dropped_from_model_config(self, mock_update):
+        """Proxy variables no longer in the model config are removed from the source."""
+        source = self._source(self._operator_recipe())
+        source["config"]["extraArgs"] = [
+            {
+                "key": "extra_env_vars",
+                "value": json.dumps(
+                    {
+                        JUJU_MANAGED_KEY: "true",
+                        "HTTP_PROXY": "http://old:8080",
+                        "http_proxy": "http://old:8080",
+                        "OPERATOR_VAR": "keep",
+                    }
+                ),
+            }
+        ]
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            _update_ingestion_source("tok", "urn:sales", source, self._params())
+
+        env = json.loads(mock_update.call_args[0][2]["config"]["extraArgs"][0]["value"])
+        assert env == {JUJU_MANAGED_KEY: "true", "OPERATOR_VAR": "keep"}
+
+    @patch("graphql.update_ingestion_source")
+    def test_proxy_change_alone_triggers_update(self, mock_update):
+        """A proxy change is enough to update a source whose connection is current."""
+        recipe = self._operator_recipe()
+        recipe["source"]["config"]["host_port"] = "trino:443"
+        recipe["source"]["config"]["username"] = "user"
+        source = self._source(recipe)
+
+        with patch.dict(os.environ, PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is True
+
+        env = json.loads(mock_update.call_args[0][2]["config"]["extraArgs"][0]["value"])
+        assert env["HTTPS_PROXY"] == "http://proxy:8443"
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_skipped_when_proxy_already_current(self, mock_update):
+        """No mutation is sent when both connection and proxy variables are current."""
+        recipe = self._operator_recipe()
+        recipe["source"]["config"]["host_port"] = "trino:443"
+        recipe["source"]["config"]["username"] = "user"
+        source = self._source(recipe)
+        with patch.dict(os.environ, PROXY_ENV, clear=True):
+            source["config"]["extraArgs"] = _build_managed_extra_args()
+
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is False
+
+        mock_update.assert_not_called()
+
+    @patch("graphql.update_ingestion_source")
+    def test_update_skips_recipe_without_source_config(self, mock_update):
+        """A recipe with no source config is left untouched rather than rebuilt."""
+        source = self._source({"sink": {"type": "datahub-rest"}})
+
+        with patch.dict(os.environ, NO_PROXY_ENV, clear=True):
+            assert _update_ingestion_source("tok", "urn:sales", source, self._params()) is False
+
+        mock_update.assert_not_called()
 
 
 class TestScheduleStability:  # pylint: disable=too-many-positional-arguments
