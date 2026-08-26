@@ -165,6 +165,33 @@ def test_gms_compile_environment_includes_system_client():
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
 
 
+def test_gms_compile_environment_enables_prometheus():
+    """GMS environment should enable the JMX-Prometheus exporter for COS scraping."""
+    encryption_secret = SimpleNamespace(
+        get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
+    )
+    model = SimpleNamespace(get_secret=lambda id: encryption_secret)
+    config = SimpleNamespace(
+        encryption_keys_secret_id="enc-id",  # nosec B106
+        opensearch_index_prefix="",
+        kafka_topic_prefix="",
+    )
+    charm = _make_charm(
+        db=_db_conn(),
+        kafka=_kafka_conn(),
+        opensearch=_os_conn(tls_ca="cert"),
+        config=config,
+        model=model,
+    )
+    context = services.ServiceContext(charm=charm)
+
+    with patch.object(services.GMSService, "is_enabled", return_value=True):
+        env = services.GMSService.compile_environment(context)
+
+    assert env is not None
+    assert env["ENABLE_PROMETHEUS"] == "true"
+
+
 def test_actions_compile_environment_includes_system_client():
     """Actions environment should include DATAHUB_SYSTEM_CLIENT_ID/SECRET."""
     config = SimpleNamespace(kafka_topic_prefix="")
@@ -206,6 +233,34 @@ def test_frontend_compile_environment_includes_system_client():
     assert env is not None
     assert env["DATAHUB_SYSTEM_CLIENT_ID"] == literals.SYSTEM_CLIENT_ID
     assert env["DATAHUB_SYSTEM_CLIENT_SECRET"] == "my-secret"
+
+
+def test_frontend_compile_environment_enables_prometheus():
+    """Frontend environment should enable the JMX-Prometheus exporter for COS scraping."""
+    encryption_secret = SimpleNamespace(
+        get_content=lambda refresh=False: {"gms-key": "secret123", "frontend-key": "secret456"},
+    )
+    model = SimpleNamespace(get_secret=lambda id: encryption_secret)
+    config = SimpleNamespace(
+        encryption_keys_secret_id="enc-id",  # nosec B106
+        opensearch_index_prefix="",
+        kafka_topic_prefix="",
+        use_play_cache_session_store=False,
+    )
+    charm = _make_charm(
+        kafka=_kafka_conn(),
+        opensearch=_os_conn(tls_ca="cert"),
+        config=config,
+        model=model,
+    )
+    context = services.ServiceContext(charm=charm)
+
+    with patch.object(services.FrontendService, "is_enabled", return_value=True):
+        with patch.dict(os.environ, {}, clear=True):
+            env = services.FrontendService.compile_environment(context)
+
+    assert env is not None
+    assert env["ENABLE_PROMETHEUS"] == "true"
 
 
 def _oauth_provider(issuer_url="https://idp.example"):
@@ -362,6 +417,32 @@ class TestBackendProvisionedGate:
         context = SimpleNamespace(charm=_make_charm(db=_db_conn()))
         container = self._container(raises=True)
         assert services.GMSService._backend_is_provisioned(context, container) is False
+
+
+class TestWorkloadIsRunningGate:
+    """Tests for GMSService._workload_is_running (the in-flight-bootstrap gate)."""
+
+    @staticmethod
+    def _container(services_map):
+        """Return a fake container whose ``get_services`` yields ``services_map``."""
+        return SimpleNamespace(get_services=lambda name: services_map)
+
+    def test_true_when_service_running(self):
+        """Running when pebble reports the service as up."""
+        container = self._container({"datahub-gms": SimpleNamespace(is_running=lambda: True)})
+        assert services.GMSService._workload_is_running(container) is True
+
+    def test_false_when_service_stopped(self):
+        """Not running when pebble reports the service as down."""
+        container = self._container({"datahub-gms": SimpleNamespace(is_running=lambda: False)})
+        assert services.GMSService._workload_is_running(container) is False
+
+    def test_false_when_layer_not_added_yet(self):
+        """Not running on a fresh container whose layer has not been added.
+
+        This is the first-reconcile case, where the upgrade job must still run.
+        """
+        assert services.GMSService._workload_is_running(self._container({})) is False
 
 
 class TestGMSSetWorkloadVersion:

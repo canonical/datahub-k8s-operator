@@ -17,6 +17,9 @@ from charms.data_platform_libs.v0.data_interfaces import (
     OpenSearchRequires,
 )
 from charms.data_platform_libs.v0.data_models import TypedCharmBase
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from ops.pebble import CheckStatus
 
@@ -25,6 +28,7 @@ import literals
 import services
 import utils
 from log import log_event_handler
+from relations.datahub_client import DatahubClientRelation
 from relations.kafka import KafkaRelation
 from relations.oauth import OauthRelation
 from relations.opensearch import OpenSearchRelation
@@ -146,6 +150,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # OAuth (SSO via the Canonical Identity Platform or an external IdP integrator)
         self.oauth_relation = OauthRelation(self)
 
+        # DataHub API clients (e.g. the MCP server) served a per-relation service account
+        self.datahub_client_relation = DatahubClientRelation(self)
+
         # Ingress. `strip_prefix=True` so Traefik strips the per-app path
         # prefix before forwarding, the frontend SPA and GMS REST endpoints
         # both expect to live at the root of their respective backend.
@@ -164,6 +171,25 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         for ingress in (self.frontend_ingress, self.gms_ingress):
             self.framework.observe(ingress.on.ready, self._on_ingress_changed)
             self.framework.observe(ingress.on.revoked, self._on_ingress_changed)
+
+        # Observability
+        self.metrics_endpoint = MetricsEndpointProvider(
+            self,
+            relation_name="metrics-endpoint",
+            jobs=[
+                {
+                    "job_name": "datahub-gms",
+                    "static_configs": [{"targets": [f"*:{literals.GMS_METRICS_PORT}"]}],
+                },
+                {
+                    "job_name": "datahub-frontend",
+                    "static_configs": [{"targets": [f"*:{literals.FRONTEND_METRICS_PORT}"]}],
+                },
+            ],
+            refresh_event=self.on.config_changed,
+        )
+        self.grafana_dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
+        self.log_forwarder = LogForwarder(self, relation_name="logging")
 
     @property
     def system_client_id(self) -> str:
@@ -280,6 +306,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         Args:
             event: The `update-status` event that is triggered at regular intervals.
         """
+        self._refresh_ingress_addresses()
+
         try:
             self._check_state()
         except (exceptions.UnreadyStateError, exceptions.ImproperSecretError) as err:
@@ -337,6 +365,18 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         else:
             self.reconcile()
 
+    def _refresh_ingress_addresses(self):
+        """Republish the unit's address on every ingress relation.
+
+        The ingress library publishes the address only on relation churn, leader
+        election and charm upgrade. On K8s those all land in the first seconds of
+        a rescheduled unit's life, when Juju can still report the departed pod's
+        address; whatever gets written then is never revisited, so the ingress
+        keeps routing to a dead IP.
+        """
+        self.frontend_ingress.provide_ingress_requirements(port=literals.FRONTEND_PORT)
+        self.gms_ingress.provide_ingress_requirements(port=literals.GMS_PORT)
+
     def _reconcile_trino_if_ready(self):
         """Run Trino ingestion reconciliation if preconditions are met."""
         if not self.unit.is_leader():
@@ -347,6 +387,17 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             self.trino_relation.reconcile_ingestions()
         except Exception as e:
             logger.error("Trino reconciliation failed: %s", str(e))
+
+    def _reconcile_datahub_clients_if_ready(self):
+        """Provision DataHub API clients if preconditions are met."""
+        if not self.unit.is_leader():
+            return
+        if not self.model.get_relation(literals.DATAHUB_CLIENT_RELATION_NAME):
+            return
+        try:
+            self.datahub_client_relation.reconcile_clients()
+        except Exception as e:
+            logger.error("DataHub client reconciliation failed: %s", str(e))
 
     def _check_state(self):  # noqa: C901
         """Check the current state of the relations and overall charm readiness.
@@ -528,6 +579,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 return
 
         self._reconcile_trino_if_ready()
+        self._reconcile_datahub_clients_if_ready()
 
         self.unit.status = ops.ActiveStatus()
 

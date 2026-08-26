@@ -1,0 +1,491 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "DataHub JVM and application metrics with container logs. Covers both GMS (port 4318) and Frontend (port 4319) JMX exporters. GMS-specific Dropwizard business metrics are in the GMS Operations section.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "panels": [],
+      "title": "Availability",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Scrape target up/down for each DataHub JMX exporter (GMS :4318, Frontend :4319).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "fillOpacity": 70, "lineWidth": 0, "spanNulls": false },
+          "mappings": [
+            { "options": { "0": { "text": "DOWN", "index": 0 }, "1": { "text": "UP", "index": 1 } }, "type": "value" }
+          ],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 1 },
+      "id": 2,
+      "interval": "1m",
+      "options": {
+        "alignValue": "left",
+        "legend": { "displayMode": "hidden", "showLegend": false },
+        "mergeValues": true,
+        "rowHeight": 0.9,
+        "showValue": "never",
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(up{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\", job=~\".*datahub.*\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\")",
+          "interval": "1m",
+          "legendFormat": "{{ container }} ({{ juju_unit }})",
+          "refId": "A"
+        }
+      ],
+      "title": "DataHub availability",
+      "type": "state-timeline"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 10,
+      "panels": [],
+      "title": "GMS Operations",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Lag between metadata being written to the DB and updates reaching the search and lineage indices. High lag means recently ingested metadata won't appear in search results or lineage views yet.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 11,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_kafka_listener_mcl_MCLKafkaListener_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "MCL (change-log) / {{ unit }}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_kafka_MetadataChangeProposalsProcessor_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "MCP (change-proposal) / {{ unit }}",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_kafka_DataHubUsageEventsProcessor_kafkaLag_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "Usage events / {{ unit }}",
+          "refId": "C"
+        }
+      ],
+      "title": "Kafka consumer lag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Latency of writing aspects to the local (PostgreSQL/Ebean) metadata store.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_entity_EntityServiceImpl_ingestAspectsToLocalDB_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "mean / {{ unit }}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_entity_EntityServiceImpl_ingestAspectsToLocalDB_99thPercentile{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "p99 / {{ unit }}",
+          "refId": "B"
+        }
+      ],
+      "title": "Database ingest latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Elasticsearch/OpenSearch search request latency served by GMS.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 13,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_search_elasticsearch_query_ESSearchDAO_searchRequest_Mean{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "mean / {{ unit }}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_search_elasticsearch_query_ESSearchDAO_searchRequest_99thPercentile{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "p99 / {{ unit }}",
+          "refId": "B"
+        }
+      ],
+      "title": "Elasticsearch search latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Elasticsearch/OpenSearch bulk write throughput from GMS indexing.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "wps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 14,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(metrics_com_linkedin_metadata_search_elasticsearch_update_ESBulkProcessor_num_elasticSearch_writes_OneMinuteRate{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "writes/s / {{ unit }}",
+          "refId": "A"
+        }
+      ],
+      "title": "Elasticsearch bulk writes",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 3,
+      "panels": [],
+      "title": "JVM",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Heap used as a fraction of max heap.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(label_replace(java_lang_Memory_HeapMemoryUsage_used{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"} / java_lang_Memory_HeapMemoryUsage_max{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM heap usage ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Heap memory used in bytes.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(label_replace(java_lang_Memory_HeapMemoryUsage_used{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM heap used",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Fraction of wall-clock time spent in garbage collection (per collector).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 33 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(label_replace(rate(jvm_gc_collection_seconds_sum{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}[$__rate_interval]), \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }} - {{ gc }}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM GC time rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Live JVM thread count.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 33 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(label_replace(java_lang_Threading_ThreadCount{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM thread count",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+      "description": "Process CPU load (0–1) for each JVM container.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1 },
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 33 },
+      "id": 15,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${prometheusds}" },
+          "expr": "label_replace(label_replace(java_lang_OperatingSystem_ProcessCpuLoad{juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\", job=~\".*datahub.*\"}, \"container\", \"$1\", \"job\", \".*_datahub-(.+)-\\\\d+$\"), \"unit\", \"$1\", \"juju_unit\", \".*/([0-9]+)$\")",
+          "legendFormat": "{{ container }} / {{ unit }}",
+          "refId": "A"
+        }
+      ],
+      "title": "JVM process CPU load",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "id": 8,
+      "panels": [],
+      "title": "Logs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "${lokids}" },
+      "description": "Logs from the datahub-gms container (Metadata Service).",
+      "gridPos": { "h": 10, "w": 8, "x": 0, "y": 42 },
+      "id": 16,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "${lokids}" },
+          "expr": "{pebble_service=\"datahub-gms\", juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "GMS logs",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "${lokids}" },
+      "description": "Logs from the datahub-frontend container (React UI / Play server). Only emits on incoming requests; empty at idle is expected.",
+      "gridPos": { "h": 10, "w": 8, "x": 8, "y": 42 },
+      "id": 17,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "${lokids}" },
+          "expr": "{pebble_service=\"datahub-frontend\", juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Frontend logs",
+      "type": "logs"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "${lokids}" },
+      "description": "Logs from the datahub-actions container (Actions Framework).",
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 42 },
+      "id": 18,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "${lokids}" },
+          "expr": "{pebble_service=\"datahub-actions\", juju_application=~\"$juju_application\", juju_model=~\"$juju_model\", juju_model_uuid=~\"$juju_model_uuid\", juju_unit=~\"$juju_unit\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "Actions logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["datahub"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Prometheus datasource",
+        "name": "prometheusds",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": {},
+        "hide": 0,
+        "label": "Loki datasource",
+        "name": "lokids",
+        "query": "loki",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "DataHub Monitoring",
+  "version": 3,
+  "weekStart": ""
+}

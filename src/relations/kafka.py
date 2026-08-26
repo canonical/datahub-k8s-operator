@@ -42,7 +42,8 @@ class KafkaRelation(framework.Object):
         """Return the current Kafka connection details, or None when unrelated.
 
         Reads relation data on demand via data_platform_libs; the password
-        comes from the juju secret published by the provider.
+        comes from the juju secret published by the provider. ``bootstrap_server``
+        carries every advertised broker as a sorted, comma-separated list.
         """
         relations = list(self.charm.kafka.relations)
         if not relations:
@@ -57,7 +58,13 @@ class KafkaRelation(framework.Object):
         password = data.get("password")
         if not (endpoints and username and password):
             return None
-        bootstrap_server = endpoints.split(",", 1)[0]
+        # Pass every advertised broker, in a fixed order. Kafka clients take a
+        # comma-separated bootstrap list and use it for failover, so collapsing it
+        # to a single entry both throws that failover away and makes the value flip
+        # whenever the provider re-orders the list. Each flip changes the pebble
+        # layer and restarts GMS, so sorting keeps a reordered-but-identical cluster
+        # from looking like a change.
+        bootstrap_server = ",".join(sorted(e.strip() for e in endpoints.split(",") if e.strip()))
         return {
             "bootstrap_server": bootstrap_server,
             "username": username,

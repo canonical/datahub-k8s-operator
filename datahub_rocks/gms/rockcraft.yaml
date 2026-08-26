@@ -33,7 +33,7 @@ checks:
     override: merge
     threshold: 4
     http:
-      url: "http://localhost:8080/health"
+      url: "http://localhost:8080/health/live"
 
 parts:
   # ---- Metadata ----

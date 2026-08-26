@@ -275,7 +275,9 @@ class TestCheckStateOIDC:
     @staticmethod
     def _set_ingress(charm, *, ready, url):
         """Replace frontend_ingress with a stub exposing the given state."""
-        charm.frontend_ingress = SimpleNamespace(is_ready=lambda: ready, url=url)
+        charm.frontend_ingress = SimpleNamespace(
+            is_ready=lambda: ready, url=url, provide_ingress_requirements=lambda **kwargs: None
+        )
 
     def test_raises_when_oidc_enabled_and_ingress_not_ready(self, charm_ctx, base_state):
         """_check_state blocks when oauth is related but the ingress hasn't published a URL."""
@@ -369,6 +371,44 @@ class TestOauthClientConfigPublication:
         rel_out = self._run_reconcile_with_oauth(charm_ctx, base_state, leader=False)
 
         assert "redirect_uri" not in rel_out.local_app_data
+
+
+class TestIngressAddressRefresh:
+    """Tests for the ingress address republished on every update-status."""
+
+    _ENDPOINT_PORTS = {
+        "frontend-ingress": literals.FRONTEND_PORT,
+        "gms-ingress": literals.GMS_PORT,
+    }
+
+    @staticmethod
+    def _stale_relations():
+        """Build both ingress relations already carrying an outdated unit address."""
+        return [
+            testing.Relation(
+                endpoint=endpoint,
+                interface="ingress",
+                remote_app_name="nginx-ingress-integrator",
+                local_unit_data={"host": '"datahub-k8s-0"', "ip": '"10.0.0.1"'},
+            )
+            for endpoint in TestIngressAddressRefresh._ENDPOINT_PORTS
+        ]
+
+    def test_stale_address_is_corrected_while_the_charm_is_blocked(self, charm_ctx, base_state):
+        """update-status republishes the current address before the readiness check bails out."""
+        relations = self._stale_relations()
+        networks = {
+            testing.Network(rel.endpoint, [testing.BindAddress([testing.Address("10.0.0.2")])]) for rel in relations
+        }
+        state = testing.State(config=base_state.config, relations=relations, networks=networks, leader=True)
+
+        state_out = charm_ctx.run(charm_ctx.on.update_status(), state)
+
+        assert isinstance(state_out.unit_status, ops.BlockedStatus)
+        for rel in relations:
+            rel_out = state_out.get_relation(rel.id)
+            assert json.loads(rel_out.local_unit_data["ip"]) == "10.0.0.2"
+            assert json.loads(rel_out.local_app_data["port"]) == self._ENDPOINT_PORTS[rel.endpoint]
 
 
 class TestGetPebbleLayer:

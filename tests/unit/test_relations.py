@@ -98,7 +98,7 @@ class TestKafkaConnection:
         return rel
 
     def test_returns_dict_when_data_present(self):
-        """The first bootstrap server is taken and credentials are included."""
+        """Every advertised broker is kept and credentials are included."""
         charm = _charm_with_relation(
             "kafka",
             relation_data={
@@ -109,10 +109,29 @@ class TestKafkaConnection:
         )
         conn = self._relation(charm).connection
         assert conn == {
-            "bootstrap_server": "kafka-a:9092",
+            "bootstrap_server": "kafka-a:9092,kafka-b:9092",
             "username": "u",
             "password": "p",  # nosec B105
         }
+
+    def test_bootstrap_server_is_stable_across_endpoint_reordering(self):
+        """A re-ordered endpoint list yields an identical bootstrap server string.
+
+        A multi-broker cluster re-orders its advertised endpoints on every rolling
+        restart. If that reordering changed this value it would churn the pebble
+        layer and restart GMS, so the list is sorted.
+        """
+        data = {"username": "u", "password": "p"}  # nosec B105
+        forward = _charm_with_relation(
+            "kafka", relation_data={"endpoints": "kafka-a:9092,kafka-b:9092,kafka-c:9092", **data}
+        )
+        shuffled = _charm_with_relation(
+            "kafka", relation_data={"endpoints": "kafka-c:9092,kafka-a:9092,kafka-b:9092", **data}
+        )
+        assert (
+            self._relation(forward).connection["bootstrap_server"]
+            == self._relation(shuffled).connection["bootstrap_server"]
+        )
 
     def test_returns_none_when_unrelated(self):
         """None is returned when no relation exists."""

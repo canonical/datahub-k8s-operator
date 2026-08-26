@@ -6,7 +6,7 @@ set -u
 
 PROMETHEUS_AGENT=""
 if [[ ${ENABLE_PROMETHEUS:-false} == true ]]; then
-  PROMETHEUS_AGENT="-javaagent:jmx_prometheus_javaagent.jar=4318:/datahub-frontend/client-prometheus-config.yaml"
+  PROMETHEUS_AGENT="-javaagent:jmx_prometheus_javaagent.jar=4319:/datahub-frontend/client-prometheus-config.yaml"
 fi
 
 OTEL_AGENT=""

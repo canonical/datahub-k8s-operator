@@ -5,6 +5,7 @@
 
 import json
 import logging
+import textwrap
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
@@ -20,22 +21,17 @@ APP_NAME = METADATA["name"]
 
 KAFKA_NAME = "kafka"
 KAFKA_CHANNEL = "3/stable"
-KAFKA_REVISION = 195
 KAFKA_OFFER_NAME = "kafka-client"
 OPENSEARCH_NAME = "opensearch"
 OPENSEARCH_CHANNEL = "2/stable"
-OPENSEARCH_REVISION = 168
 OPENSEARCH_OFFER_NAME = "os-client"
 POSTGRES_NAME = "postgresql"
 POSTGRES_CHANNEL = "14/stable"
-POSTGRES_REVISION = 553
 POSTGRES_OFFER_NAME = "pg-client"
 CERTIFICATES_NAME = "self-signed-certificates"
 CERTIFICATES_CHANNEL = "latest/stable"
-CERTIFICATES_REVISION = 264
 ZOOKEPER_NAME = "zookeeper"
 ZOOKEEPER_CHANNEL = "3/stable"
-ZOOKEEPER_REVISION = 149
 INGRESS_CHARM = "traefik-k8s"
 INGRESS_CHANNEL = "latest/stable"
 INGRESS_FRONTEND_NAME = "traefik-frontend"
@@ -56,6 +52,17 @@ OAUTH_STUB_CONFIG = {
     "client_id": "stub-client-id",
     "client_secret": "stub-client-secret",  # nosec B105
 }
+TRINO_NAME = "trino-k8s"
+TRINO_CHANNEL = "latest/edge"
+TRINO_HTTP_PORT = 8080
+TRINO_SECRET_NAME = "trino-catalog-secret"  # nosec B105
+TRINO_BACKEND_NAME = "demo"
+TRINO_REPLICAS = textwrap.dedent("""\
+    rw:
+      user: trino
+      password: trino-catalog-pwd
+""")  # nosec B105
+FRONTEND_PORT = 9002
 
 
 def _app_status_current(status: jubilant.Status, app_name: str) -> str:
@@ -212,11 +219,11 @@ def deploy_lxd_dependencies(lxd_juju: jubilant.Juju) -> None:
     Args:
         lxd_juju: Jubilant object for the LXD model.
     """
-    lxd_juju.deploy(KAFKA_NAME, channel=KAFKA_CHANNEL, revision=KAFKA_REVISION)
-    lxd_juju.deploy(OPENSEARCH_NAME, channel=OPENSEARCH_CHANNEL, num_units=2, revision=OPENSEARCH_REVISION)
-    lxd_juju.deploy(POSTGRES_NAME, channel=POSTGRES_CHANNEL, revision=POSTGRES_REVISION)
-    lxd_juju.deploy(CERTIFICATES_NAME, channel=CERTIFICATES_CHANNEL, revision=CERTIFICATES_REVISION)
-    lxd_juju.deploy(ZOOKEPER_NAME, channel=ZOOKEEPER_CHANNEL, revision=ZOOKEEPER_REVISION)
+    lxd_juju.deploy(KAFKA_NAME, channel=KAFKA_CHANNEL)
+    lxd_juju.deploy(OPENSEARCH_NAME, channel=OPENSEARCH_CHANNEL, num_units=2)
+    lxd_juju.deploy(POSTGRES_NAME, channel=POSTGRES_CHANNEL)
+    lxd_juju.deploy(CERTIFICATES_NAME, channel=CERTIFICATES_CHANNEL)
+    lxd_juju.deploy(ZOOKEPER_NAME, channel=ZOOKEEPER_CHANNEL)
 
     logger.info("Waiting for LXD dependencies to settle")
     wait_for_apps_status(
@@ -436,6 +443,178 @@ def get_first_proxied_url(juju: jubilant.Juju, traefik_app: str) -> str:
         if isinstance(value, dict) and "url" in value:
             return value["url"]
     raise ValueError(f"No requirer URL found in {traefik_app} proxied-endpoints: {endpoints}")
+
+
+def wait_for_https_proxied_url(
+    juju: jubilant.Juju, traefik_app: str, *, timeout: float = 300, delay: float = 10
+) -> str:
+    """Return a Traefik app's proxied URL once it is served over HTTPS.
+
+    Traefik stays ``active`` while serving plain HTTP, so reaching ``active`` after
+    a ``certificates`` relation is added does not mean TLS has been applied yet.
+    Poll rather than sampling the URL once.
+
+    Args:
+        juju: Jubilant object.
+        traefik_app: Traefik app name.
+        timeout: Maximum seconds to wait for the URL to become HTTPS.
+        delay: Seconds between polls.
+
+    Returns:
+        The HTTPS URL published by the Traefik app.
+
+    Raises:
+        AssertionError: If the URL is still not HTTPS when the timeout expires.
+    """
+    url = ""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        url = get_first_proxied_url(juju, traefik_app)
+        if url.startswith("https://"):
+            return url
+        time.sleep(delay)
+    raise AssertionError(f"{traefik_app} URL still plain http after {timeout}s: {url}")
+
+
+def datahub_graphql_session(juju: jubilant.Juju) -> Tuple[requests.Session, str]:
+    """Log into the DataHub frontend and return a session plus its GraphQL URL.
+
+    The frontend proxies GraphQL to GMS and authorizes with the session cookie
+    set at login, which is how the DataHub UI itself talks to the API.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where DataHub runs.
+
+    Returns:
+        Tuple of (authenticated session, GraphQL endpoint URL).
+    """
+    base_url = get_unit_url(juju, APP_NAME, 0, FRONTEND_PORT)
+    password = get_admin_password(juju)
+    session = requests.Session()
+    response = request_until(
+        session,
+        "POST",
+        f"{base_url}/logIn",
+        json={"username": "datahub", "password": password},
+    )
+    assert response.status_code == 200, f"admin login failed: {response.status_code} {response.text[:300]}"
+    return session, f"{base_url}/api/v2/graphql"
+
+
+def graphql_query(
+    session: requests.Session,
+    url: str,
+    query: str,
+    variables: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run a GraphQL query or mutation against DataHub and return its data block.
+
+    Args:
+        session: Authenticated session from :func:`datahub_graphql_session`.
+        url: GraphQL endpoint URL.
+        query: GraphQL query or mutation.
+        variables: Optional variables for the query.
+
+    Returns:
+        The ``data`` block of the response body.
+    """
+    payload: Dict[str, Any] = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    response = session.post(url, json=payload, timeout=30)
+    assert response.status_code == 200, f"GraphQL request failed: {response.status_code} {response.text[:300]}"
+    body = response.json()
+    assert not body.get("errors"), f"GraphQL returned errors: {body['errors']}"
+    return body["data"]
+
+
+def add_trino_catalog_secret(juju: jubilant.Juju) -> str:
+    """Add (or reuse) the Juju user secret holding Trino catalog credentials.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model.
+
+    Returns:
+        The unique identifier of the secret, as referenced from catalog-config.
+    """
+    current_secret = next(
+        (secret for secret in juju.secrets() if TRINO_SECRET_NAME in (secret.name, secret.label)),
+        None,
+    )
+    if current_secret:
+        uri = str(current_secret.uri)
+    else:
+        uri = str(juju.add_secret(name=TRINO_SECRET_NAME, content={"replicas": TRINO_REPLICAS}))
+    return uri.split(":")[-1]
+
+
+def build_trino_catalog_config(secret_id: str, catalogs: Iterable[str]) -> str:
+    """Build a Trino catalog-config that declares one catalog per given name.
+
+    The backend points at a database that does not exist: the trino-catalog
+    relation only carries catalog names, so the catalogs never have to be
+    queryable for DataHub to build ingestion sources from them.
+
+    Args:
+        secret_id: Identifier of the Juju secret holding the catalog credentials.
+        catalogs: Catalog names to declare.
+
+    Returns:
+        The catalog-config value as a YAML string.
+    """
+    config = {
+        "backends": {
+            TRINO_BACKEND_NAME: {
+                "connector": "postgresql",
+                "url": "jdbc:postgresql://example.com:5432",
+                "params": "ssl=false",
+            }
+        },
+        "catalogs": {
+            name: {"backend": TRINO_BACKEND_NAME, "database": name, "secret-id": secret_id} for name in catalogs
+        },
+    }
+    return yaml.safe_dump(config, sort_keys=False)
+
+
+def set_trino_catalogs(juju: jubilant.Juju, catalogs: Iterable[str]) -> None:
+    """Reconfigure Trino to serve exactly the given catalogs.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where Trino runs.
+        catalogs: Catalog names Trino should declare.
+    """
+    secret_id = add_trino_catalog_secret(juju)
+    juju.config(TRINO_NAME, {"catalog-config": build_trino_catalog_config(secret_id, catalogs)})
+    wait_for_apps_status(juju, {TRINO_NAME: "active"}, timeout=10 * 60)
+
+
+def deploy_trino(juju: jubilant.Juju, catalogs: Iterable[str]) -> None:
+    """Deploy Trino into the K8s model and configure it to serve some catalogs.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where DataHub runs.
+        catalogs: Catalog names Trino should declare.
+    """
+    juju.deploy(TRINO_NAME, channel=TRINO_CHANNEL, trust=True)
+    wait_for_apps_status(juju, {TRINO_NAME: "active"}, timeout=20 * 60)
+
+    add_trino_catalog_secret(juju)
+    juju.grant_secret(TRINO_SECRET_NAME, TRINO_NAME)
+    set_trino_catalogs(juju, catalogs)
+
+
+def trino_relation_url(juju: jubilant.Juju) -> str:
+    """Return the internal Trino URL that the trino-catalog relation advertises.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where Trino runs.
+
+    Returns:
+        The Trino URL in ``host:port`` form.
+    """
+    model = model_short_name(juju.model or "")
+    return f"{TRINO_NAME}.{model}.svc.cluster.local:{TRINO_HTTP_PORT}"
 
 
 def deploy_oauth_integrator(juju: jubilant.Juju) -> None:

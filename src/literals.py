@@ -9,6 +9,9 @@ PLACEHOLDER_TOPIC = "datahub_topic"
 FRONTEND_PORT = 9002
 FRONTEND_FALLBACK_URL = f"http://localhost:{FRONTEND_PORT}"
 GMS_PORT = 8080
+# GMS and Frontend share the pod network namespace, use distinct JMX-Prometheus ports
+GMS_METRICS_PORT = 4318
+FRONTEND_METRICS_PORT = 4319
 # Consecutive `up`-check failures before pebble restarts a workload. At the 10s
 # check period this is ~5 min, long enough that a slow-but-healthy JVM cold start
 # is not killed mid-boot, short enough to promptly rescue a genuinely hung start.
@@ -25,8 +28,15 @@ INIT_PWD_SECRET_LABEL = "datahub-init-pwd"  # nosec B105
 ENCRYPTION_KEYS_SECRET_LABEL = "datahub-encryption-keys"  # nosec B105
 SYSTEM_CLIENT_ID = "__datahub_system"
 SYSTEM_CLIENT_SECRET_LABEL = "datahub-system-client-secret"  # nosec B105
+SYSTEM_ACTOR_URN = f"urn:li:corpuser:{SYSTEM_CLIENT_ID}"
 INGESTION_TOKEN_SECRET_LABEL = "datahub-ingestion-token"  # nosec B105
+INGESTION_TOKEN_NAME = "juju-managed-ingestion-token"  # nosec B105
 DEFAULT_EXECUTOR_ID = "default"
+
+# `datahub_client` relation: one DataHub service account and one Juju secret
+# holding its access token, per relation.
+DATAHUB_CLIENT_RELATION_NAME = "datahub-client"
+DATAHUB_CLIENT_SA_NAME_PREFIX = "[juju] "
 
 # Paths for scripts baked into the rocks (see datahub_rocks/shared/scripts/).
 RUNNER_PATH = "/charm-scripts/runner.sh"
