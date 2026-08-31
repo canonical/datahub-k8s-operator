@@ -47,6 +47,17 @@ variable "encryption_keys" {
   default = {}
 }
 
+variable "external_hostname" {
+  description = <<-EOT
+    Base DNS domain to serve the DataHub frontend from. When set, the frontend Traefik is
+    configured for host-based routing (`external_hostname` plus `routing_mode = "subdomain"`),
+    which the frontend requires. Leave empty to keep path routing, which is fine for the GMS
+    but leaves the frontend unusable in a browser.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "k8s_model_uuid" {
   description = "UUID of the Kubernetes Juju model where DataHub and the ingress are deployed."
   type        = string

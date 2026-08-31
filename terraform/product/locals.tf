@@ -22,6 +22,15 @@ locals {
   # SSO: deploy the external IdP integrator and relate it to DataHub when configured.
   enable_sso = nonsensitive(var.oauth_external_idp_integrator_config != null)
 
+  # Ingress: serve the frontend application at the root of a hostname using Traefik.
+  traefik_frontend_config = merge(
+    var.external_hostname != "" ? {
+      "external_hostname" = var.external_hostname
+      "routing_mode"      = "subdomain"
+    } : {},
+    var.traefik_frontend.config,
+  )
+
   # DataHub config = user-provided config plus the secret IDs created by this module.
   datahub_config = merge(
     var.datahub.config,

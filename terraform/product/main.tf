@@ -111,7 +111,7 @@ module "traefik_frontend" {
   app_name   = var.traefik_frontend.app_name
   channel    = var.traefik_frontend.channel
   revision   = var.traefik_frontend.revision
-  config     = var.traefik_frontend.config
+  config     = local.traefik_frontend_config
   units      = var.traefik_frontend.units
   trust      = true
 }
