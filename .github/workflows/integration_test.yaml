@@ -29,5 +29,7 @@ jobs:
         ["test_charm.py",
         "test_upgrade.py",
         "test_scaling.py",
-        "test_trino_catalog.py"]
+        "test_trino_catalog.py",
+        "test_observability.py",
+        "test_datahub_client.py"]
       with-uv: true

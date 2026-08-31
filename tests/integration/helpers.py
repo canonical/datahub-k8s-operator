@@ -8,7 +8,7 @@ import logging
 import textwrap
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import jubilant
 import requests
@@ -52,6 +52,18 @@ OAUTH_STUB_CONFIG = {
     "client_id": "stub-client-id",
     "client_secret": "stub-client-secret",  # nosec B105
 }
+PROMETHEUS_NAME = "prometheus-k8s"
+PROMETHEUS_CHANNEL = "2/stable"
+PROMETHEUS_PORT = 9090
+LOKI_NAME = "loki-k8s"
+LOKI_CHANNEL = "2/stable"
+LOKI_PORT = 3100
+GRAFANA_NAME = "grafana-k8s"
+GRAFANA_CHANNEL = "2/stable"
+GRAFANA_PORT = 3000
+COS_APPS = (PROMETHEUS_NAME, LOKI_NAME, GRAFANA_NAME)
+MCP_NAME = "datahub-mcp-k8s"
+MCP_CHANNEL = "latest/edge"
 TRINO_NAME = "trino-k8s"
 TRINO_CHANNEL = "latest/edge"
 TRINO_HTTP_PORT = 8080
@@ -630,6 +642,76 @@ def deploy_oauth_integrator(juju: jubilant.Juju) -> None:
         channel=OAUTH_INTEGRATOR_CHANNEL,
         config=OAUTH_STUB_CONFIG,
     )
+
+
+def deploy_cos(juju: jubilant.Juju) -> None:
+    """Deploy Prometheus, Loki and Grafana into the model and settle them.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where DataHub runs.
+    """
+    juju.deploy(PROMETHEUS_NAME, channel=PROMETHEUS_CHANNEL, trust=True)
+    juju.deploy(LOKI_NAME, channel=LOKI_CHANNEL, trust=True)
+    juju.deploy(GRAFANA_NAME, channel=GRAFANA_CHANNEL, trust=True)
+    wait_for_all_active(juju, COS_APPS, timeout=20 * 60)
+
+
+def get_grafana_admin_password(juju: jubilant.Juju) -> str:
+    """Return the Grafana admin password via its get-admin-password action.
+
+    Args:
+        juju: Jubilant object pointing at the K8s model where Grafana runs.
+
+    Returns:
+        The Grafana admin password.
+
+    Raises:
+        ValueError: If the action does not return a password.
+    """
+    action_output = juju.run(f"{GRAFANA_NAME}/0", "get-admin-password", wait=60)
+    password = action_output.results.get("admin-password", "")
+    if not password:
+        raise ValueError(f"get-admin-password did not return a password: {action_output.results}")
+    return password
+
+
+def poll_until(
+    juju: jubilant.Juju,
+    predicate: Callable[[], bool],
+    message: str,
+    *,
+    timeout: float = 10 * 60,
+    delay: float = 15,
+) -> None:
+    """Poll a predicate until it holds, treating a raised exception as not ready.
+
+    Backends reached over HTTP need time after a relation settles: Prometheus
+    has to scrape, Loki has to receive a push, Grafana has to load a dashboard.
+    None of that shows up in a Juju status, so it has to be waited on directly.
+
+    Args:
+        juju: Jubilant object, used for its polling loop.
+        predicate: Called with no arguments; True means ready.
+        message: Assertion message used if the predicate never holds.
+        timeout: Maximum seconds to wait.
+        delay: Seconds between polls.
+
+    Raises:
+        AssertionError: If the predicate does not hold before the timeout.
+    """
+
+    def _ready(_: jubilant.Status) -> bool:
+        """Evaluate the predicate, treating a failed read as not ready."""
+        try:
+            return predicate()
+        except Exception as exc:  # noqa: BLE001 - any read failure means "not yet"
+            logger.info("Check not ready yet: %s", exc)
+            return False
+
+    try:
+        juju.wait(_ready, timeout=timeout, delay=delay, successes=1)
+    except TimeoutError as exc:
+        raise AssertionError(message) from exc
 
 
 def model_short_name(model_name: str) -> str:
