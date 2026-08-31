@@ -3,15 +3,11 @@
 
 """Define DataHub-Postgresql relation."""
 
-import logging
 from typing import Dict, Optional
 
 from ops import framework
 
 import literals
-from log import log_event_handler
-
-logger = logging.getLogger(__name__)
 
 
 class PostgresqlRelation(framework.Object):
@@ -67,7 +63,6 @@ class PostgresqlRelation(framework.Object):
             "password": password,
         }
 
-    @log_event_handler(logger)
     def _on_database_changed(self, event) -> None:
         """Handle database-created / endpoints-changed events.
 
@@ -76,7 +71,6 @@ class PostgresqlRelation(framework.Object):
         """
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
         """Handle broken relations with the database.
 

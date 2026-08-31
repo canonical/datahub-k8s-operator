@@ -27,7 +27,6 @@ import exceptions
 import literals
 import services
 import utils
-from log import log_event_handler
 from relations.datahub_client import DatahubClientRelation
 from relations.kafka import KafkaRelation
 from relations.oauth import OauthRelation
@@ -201,7 +200,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """Return the DataHub system client secret."""
         return self._get_or_create_system_client_secret()
 
-    @log_event_handler(logger)
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
         """Handle pebble-ready event.
 
@@ -210,7 +208,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         self.reconcile()
 
-    @log_event_handler(logger)
     def _on_reindex_action(self, event):
         """Run the 'RestoreIndices' command in 'datahub-upgrade' container.
 
@@ -243,7 +240,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             }
         event.set_results(result)
 
-    @log_event_handler(logger)
     def _on_get_password_action(self, event):
         """Return the auto-generated initial admin password.
 
@@ -262,7 +258,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         event.set_results({"password": password})
 
-    @log_event_handler(logger)
     def _on_config_changed(self, event):
         """Handle changed configuration.
 
@@ -271,7 +266,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         self.reconcile()
 
-    @log_event_handler(logger)
     def _on_secret_changed(self, event):
         """Handle secret-changed events for the configured encryption secret.
 
@@ -290,7 +284,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         if id_match or label_match or oauth_match:
             self.reconcile()
 
-    @log_event_handler(logger)
     def _on_peer_relation_changed(self, event):
         """Handle peer relation changed event.
 
@@ -299,7 +292,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """
         self.reconcile()
 
-    @log_event_handler(logger)
     def _on_update_status(self, event):  # noqa C901  # pylint: disable=R0915
         """Handle `update-status` events.
 
@@ -519,7 +511,6 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         return ""
 
-    @log_event_handler(logger)
     def _on_ingress_changed(self, event):
         """Re-render pebble plans so the OIDC base URL tracks the ingress URL.
 

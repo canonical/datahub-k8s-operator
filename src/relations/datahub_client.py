@@ -16,7 +16,6 @@ from ops import framework
 
 import graphql
 import literals
-from log import log_event_handler
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +85,6 @@ class DatahubClientRelation(framework.Object):
             return ingress_url.rstrip("/")
         return f"http://{self.charm.app.name}.{self.charm.model.name}.svc.cluster.local:{literals.GMS_PORT}"
 
-    @log_event_handler(logger)
     def _on_relation_changed(self, event) -> None:
         """Handle datahub-client relation changed events.
 
@@ -95,7 +93,6 @@ class DatahubClientRelation(framework.Object):
         """
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
         """Delete the DataHub service account backing a departing relation.
 

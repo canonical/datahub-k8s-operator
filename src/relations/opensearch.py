@@ -3,14 +3,9 @@
 
 """Define DataHub-Opensearch relation."""
 
-import logging
 from typing import Dict, Optional
 
 from ops import framework
-
-from log import log_event_handler
-
-logger = logging.getLogger(__name__)
 
 
 class OpenSearchRelation(framework.Object):
@@ -67,7 +62,6 @@ class OpenSearchRelation(framework.Object):
             "tls-ca": tls_ca,
         }
 
-    @log_event_handler(logger)
     def _on_opensearch_changed(self, event) -> None:
         """Handle endpoints-changed / index-created events.
 
@@ -76,7 +70,6 @@ class OpenSearchRelation(framework.Object):
         """
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
         """Handle broken relations with Opensearch.
 

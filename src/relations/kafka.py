@@ -3,14 +3,9 @@
 
 """Define DataHub-Kafka relation."""
 
-import logging
 from typing import Dict, Optional
 
 from ops import framework
-
-from log import log_event_handler
-
-logger = logging.getLogger(__name__)
 
 
 class KafkaRelation(framework.Object):
@@ -71,7 +66,6 @@ class KafkaRelation(framework.Object):
             "password": password,
         }
 
-    @log_event_handler(logger)
     def _on_kafka_changed(self, event):
         """Handle bootstrap-server-changed / topic-created events.
 
@@ -80,7 +74,6 @@ class KafkaRelation(framework.Object):
         """
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
         """Handle broken relations with Kafka.
 

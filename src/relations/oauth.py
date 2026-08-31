@@ -17,7 +17,6 @@ from ops import framework
 
 import exceptions
 import literals
-from log import log_event_handler
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +100,6 @@ class OauthRelation(framework.Object):
         except ClientConfigError as e:
             raise exceptions.UnreadyStateError(f"invalid OAuth client config: {e}") from None
 
-    @log_event_handler(logger)
     def _on_oauth_info_changed(self, event) -> None:
         """Handle oauth-info-changed events from the provider.
 
@@ -110,7 +108,6 @@ class OauthRelation(framework.Object):
         """
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_oauth_info_removed(self, event) -> None:
         """Handle oauth-info-removed events when the relation is broken.
 
@@ -119,7 +116,6 @@ class OauthRelation(framework.Object):
         """
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_invalid_client_config(self, event) -> None:
         """Handle invalid-client-config events from the oauth library.
 

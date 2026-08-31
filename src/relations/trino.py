@@ -19,7 +19,6 @@ from ops import framework
 
 import graphql
 import literals
-from log import log_event_handler
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +563,6 @@ class TrinoRelation(framework.Object):
         self._store_access_token(token)
         return self._access_token
 
-    @log_event_handler(logger)
     def _on_trino_catalog_changed(self, event) -> None:
         """Handle trino-catalog relation changed events.
 
@@ -576,7 +574,6 @@ class TrinoRelation(framework.Object):
 
         self.charm.reconcile()
 
-    @log_event_handler(logger)
     def _on_relation_broken(self, event) -> None:
         """Handle broken relations with Trino.
 
