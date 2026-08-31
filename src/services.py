@@ -809,7 +809,7 @@ class GMSService(AbstractService):
         try:
             process = container.exec(
                 command=[
-                    "psql",
+                    literals.PSQL_BIN_PATH,
                     "-h",
                     db_conn["host"],
                     "-p",
