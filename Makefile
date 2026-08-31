@@ -16,7 +16,7 @@ REGISTRY := localhost:32000
 
 # Ensure yq is installed: 'sudo snap install yq'
 CHARM_NAME := $(shell yq '.name' $(CHARMCRAFT_YAML))
-CHARM_BASE := $(shell yq '.bases[0].run-on[0].name' $(CHARMCRAFT_YAML))-$(shell yq '.bases[0].run-on[0].channel' $(CHARMCRAFT_YAML))
+CHARM_PLATFORM := $(shell yq '.platforms | keys | .[0]' $(CHARMCRAFT_YAML))
 CHARM_ARCH := amd64
 
 # --- Rock directories ---
@@ -41,7 +41,7 @@ GMS_VERSION := $(shell yq '.version' $(GMS_ROCKCRAFT_YAML))
 GMS_ROCK := $(GMS_DIR)/$(GMS_NAME)_$(GMS_VERSION)_$(CHARM_ARCH).rock
 
 # The expected output file from charmcraft pack
-CHARM_FILE := $(PROJECT_ROOT)/$(CHARM_NAME)_$(CHARM_BASE)-$(CHARM_ARCH).charm
+CHARM_FILE := $(PROJECT_ROOT)/$(CHARM_NAME)_$(CHARM_PLATFORM).charm
 
 # Default target
 .PHONY: all

@@ -36,17 +36,9 @@ links:
 assumes:
   - juju >= 3.4
 
-bases:
-  - build-on:
-    - name: ubuntu
-      channel: "22.04"
-      architectures:
-      - amd64
-    run-on:
-    - name: ubuntu
-      channel: "22.04"
-      architectures:
-      - amd64
+base: ubuntu@22.04
+platforms:
+  amd64:
 
 charm-libs:
   - lib: data_platform_libs.data_interfaces
@@ -85,6 +77,12 @@ parts:
       - "cargo-1.85"
     prime:
       - -datahub_rocks/
+
+  icon:
+    plugin: dump
+    source: .
+    stage:
+      - icon.svg
 
 peers:
   peer:
