@@ -1,0 +1,11 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+data_platform_model_uuid = "6aa0d512-13a6-4538-806b-b222a4172616"
+k8s_model_uuid           = "b6d87682-bf5d-4e41-8987-33e1db927192"
+traefik_frontend = {
+  config = {
+    external_hostname = "datahub-ui.example.com"
+    routing_mode      = "subdomain"
+  }
+}

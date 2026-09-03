@@ -22,8 +22,8 @@ run "setup_tests" {
 
 run "full_deploy" {
   variables {
-    k8s_model_uuid     = run.setup_tests.k8s_model_uuid
-    machine_model_uuid = run.setup_tests.machine_model_uuid
+    k8s_model_uuid           = run.setup_tests.k8s_model_uuid
+    data_platform_model_uuid = run.setup_tests.data_platform_model_uuid
   }
 
   assert {
@@ -37,15 +37,15 @@ run "full_deploy" {
   }
 }
 
-# OpenSearch is the long wait on the machine cloud; it only reaches active with the kernel sysctls
-# set by tests/setup/pre_run_script.sh (wired via the workflow's additional-setup-script).
+# OpenSearch is the long wait; it only reaches active with the kernel sysctls set by
+# tests/setup/pre_run_script.sh (wired via the workflow's additional-setup-script).
 run "wait_for_opensearch_active" {
   module {
     source = "./tests/wait_for_active"
   }
 
   variables {
-    model_uuid = run.setup_tests.machine_model_uuid
+    model_uuid = run.setup_tests.data_platform_model_uuid
     app_name   = "opensearch"
     timeout    = 1200
   }
@@ -78,8 +78,8 @@ run "wait_for_datahub_active" {
 # ingress HTTPS, so the charm's OIDC guard is satisfied.
 run "enable_sso" {
   variables {
-    k8s_model_uuid     = run.setup_tests.k8s_model_uuid
-    machine_model_uuid = run.setup_tests.machine_model_uuid
+    k8s_model_uuid           = run.setup_tests.k8s_model_uuid
+    data_platform_model_uuid = run.setup_tests.data_platform_model_uuid
     oauth_external_idp_integrator_config = {
       client_id     = "stub-client-id"
       client_secret = "stub-client-secret"

@@ -3,7 +3,8 @@
 # See LICENSE file for licensing details.
 #
 # Pre-run setup for the product Terraform test. Sets the kernel sysctls OpenSearch requires so its
-# units reach `active` on the LXD machine cloud. LXD containers inherit these from the runner host.
+# units reach `active`. The workload reads them from the host kernel, which the runner shares with
+# the Kubernetes cluster its pods run on.
 set -euo pipefail
 
 echo "vm.max_map_count=262144

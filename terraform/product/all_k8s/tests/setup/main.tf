@@ -19,8 +19,15 @@ provider "juju" {
   }
 }
 
-resource "juju_model" "machine" {
-  name = "tf-testing-deps-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+resource "juju_model" "data_platform" {
+  name       = "tf-testing-deps-${formatdate("YYYYMMDDhhmmss", timestamp())}"
+  credential = var.k8s_credential_name
+
+  cloud {
+    name = var.k8s_cloud_name
+  }
+
+  config = var.k8s_workload_storage != "" ? { workload-storage = var.k8s_workload_storage } : {}
 }
 
 resource "juju_model" "k8s" {
@@ -52,8 +59,8 @@ variable "k8s_credential_name" {
   default     = "tfk8s"
 }
 
-output "machine_model_uuid" {
-  value = juju_model.machine.uuid
+output "data_platform_model_uuid" {
+  value = juju_model.data_platform.uuid
 }
 
 output "k8s_model_uuid" {

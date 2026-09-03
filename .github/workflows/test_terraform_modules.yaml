@@ -20,3 +20,10 @@ jobs:
       lxd-controller-with-k8s-cloud: true
       additional-setup-script: "./tests/setup/pre_run_script.sh"
       terraform-directories: '["terraform/product"]'
+  terraform-product-all-k8s-tests:
+    uses: canonical/operator-workflows/.github/workflows/terraform_modules_test.yaml@main
+    secrets: inherit
+    with:
+      k8s-controller: true
+      additional-setup-script: "./tests/setup/pre_run_script.sh"
+      terraform-directories: '["terraform/product/all_k8s"]'
