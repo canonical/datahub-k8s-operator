@@ -232,12 +232,19 @@ def deploy_lxd_dependencies(lxd_juju: jubilant.Juju) -> None:
         lxd_juju: Jubilant object for the LXD model.
     """
     juju_version = lxd_juju.version()
-    force_postgresql = juju_version.major == 4
-    if force_postgresql:
+    is_juju_4 = juju_version.major == 4
+    force_postgresql = is_juju_4
+    opensearch_num_units = 1 if is_juju_4 else 2
+    if is_juju_4:
         logger.warning("Deploying PostgreSQL with --force for Juju %s", juju_version)
+        logger.warning("Deploying a single OpenSearch unit for Juju %s", juju_version)
 
     lxd_juju.deploy(KAFKA_NAME, channel=KAFKA_CHANNEL)
-    lxd_juju.deploy(OPENSEARCH_NAME, channel=OPENSEARCH_CHANNEL, num_units=2)
+    lxd_juju.deploy(
+        OPENSEARCH_NAME,
+        channel=OPENSEARCH_CHANNEL,
+        num_units=opensearch_num_units,
+    )
     lxd_juju.deploy(POSTGRES_NAME, channel=POSTGRES_CHANNEL, force=force_postgresql)
     lxd_juju.deploy(CERTIFICATES_NAME, channel=CERTIFICATES_CHANNEL)
     lxd_juju.deploy(ZOOKEPER_NAME, channel=ZOOKEEPER_CHANNEL)
