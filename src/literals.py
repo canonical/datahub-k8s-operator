@@ -17,6 +17,36 @@ FRONTEND_METRICS_PORT = 4319
 # is not killed mid-boot, short enough to promptly rescue a genuinely hung start.
 HEALTHCHECK_FAILURE_THRESHOLD = 30
 
+GMS_SERVICE_NAME = "datahub-gms"
+ENTITY_REGISTRY_PATH = "/datahub/datahub-gms/resources/entity-registry.yml"
+PEBBLE_BIN_PATH = "/charm/bin/pebble"
+PEBBLE_SERVICE_ACTIVE = "active"
+PEBBLE_SERVICE_BACKOFF = "backoff"
+
+# GMS checks for the upgrade job's record every 10s for up to 1h, then exits for pebble to restart.
+GMS_UPGRADE_POLL_MILLIS = 10000
+GMS_UPGRADE_POLL_ATTEMPTS = 360
+
+# The SystemUpdate job, run as a pebble service that pebble reruns with backoff until stopped.
+UPGRADE_SERVICE_NAME = "datahub-upgrade"
+UPGRADE_SCRIPT_PATH = "/charm-external/run-upgrade.sh"
+UPGRADE_NOTICE_KEY = "canonical.com/datahub-k8s/upgrade-exited"
+UPGRADE_TIMEOUT = "1h"  # turns a hung run into a failed one
+UPGRADE_KILL_AFTER = "30s"  # SIGTERM grace before SIGKILL when the timeout fires
+UPGRADE_BACKOFF_DELAY = "5m"  # first retry; pebble doubles it on each rerun
+UPGRADE_BACKOFF_LIMIT = "30m"  # at most two runs an hour while drift persists
+
+# Backend probes: bound how long a hook stalls on an unreachable backend.
+KAFKA_PROBE_TIMEOUT_MS = 10000
+OPENSEARCH_PROBE_TIMEOUT_SECONDS = 10
+# Created by SystemUpdate on every backend; recheck on DataHub version bumps.
+OPENSEARCH_SENTINELS = (
+    "datahubpolicyindex_v2",
+    "graph_service_v1",
+    "system_metadata_service_v1",
+    "datahub_usage_event",
+)
+
 # OAuth/OIDC via the `oauth` relation (Canonical Identity Platform or an
 # external IdP integrator). The callback path is fixed by the DataHub frontend.
 OAUTH_RELATION_NAME = "oauth"
@@ -55,3 +85,15 @@ JAVA_HOME = "/usr/lib/jvm/java-17-openjdk-amd64"
 JAVA_BIN_PATH = f"{JAVA_HOME}/bin/java"
 KEYTOOL_BIN_PATH = f"{JAVA_HOME}/bin/keytool"
 PSQL_BIN_PATH = "/usr/bin/psql"
+
+# `rc` starts at 143, so a run that pebble stops is not recorded as a success.
+# `--foreground` keeps timeout in the service's process group. Pebble stops a service by
+# signalling that group, so without it timeout and the JVM would keep running.
+UPGRADE_SCRIPT = f"""#!/bin/bash
+rc=143
+trap '{PEBBLE_BIN_PATH} notify {UPGRADE_NOTICE_KEY} rc=$rc' EXIT
+timeout --foreground --kill-after={UPGRADE_KILL_AFTER} {UPGRADE_TIMEOUT} \\
+    {JAVA_BIN_PATH} -jar {UPGRADE_JAR_PATH} -u SystemUpdate
+rc=$?
+exit $rc
+"""

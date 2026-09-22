@@ -61,8 +61,8 @@ Notes:
 ## Notes & caveats
 
 - **Admin password:** not a Terraform output. Retrieve it with
-  `juju run datahub-k8s/0 get-password`. The proxied URL comes from
-  `juju run traefik-frontend/0 show-proxied-endpoints`.
+  `juju run datahub-k8s/0 get-password`. The published URL comes from
+  `juju run traefik-frontend/0 show-external-endpoints`.
 - **Multi-user controllers:** when the data platform and DataHub models are owned by different
   users, grant the offers with `juju grant` (a single-admin controller needs no grant).
 

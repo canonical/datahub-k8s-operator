@@ -461,3 +461,199 @@ class TestReconcileInitFailure:
 
         assert isinstance(state_out.unit_status, testing.BlockedStatus)
         assert "failed to initialize db" in state_out.unit_status.message
+
+
+class TestReconcileBackendStatus:
+    """reconcile() reports backend drift and the upgrade job without skipping the replan."""
+
+    def _reconcile(self, charm_ctx, base_state, *, leader, gms_error, gms_held=False):
+        """Run config-changed with GMS initialization raising ``gms_error``.
+
+        Returns:
+            The output of the run and the fake container shared by every workload.
+        """
+        fake_container = MagicMock()
+        fake_container.can_connect.return_value = True
+        secret = MagicMock()
+        secret.get_content.return_value = {"gms-key": "k1", "frontend-key": "k2"}
+        state = testing.State(config=base_state.config, leader=leader)
+
+        with charm_ctx(charm_ctx.on.config_changed(), state) as mgr:
+            with patch.object(mgr.charm.model, "get_secret", return_value=secret):
+                _stub_connections(mgr.charm)
+                with (
+                    patch.object(mgr.charm.unit, "get_container", return_value=fake_container),
+                    patch("charm.get_pebble_layer", return_value={}),
+                    patch.object(svc.GMSService, "run_initialization", side_effect=gms_error),
+                    patch.object(svc.GMSService, "is_waiting_for_upgrade", return_value=gms_held),
+                    patch.object(svc.FrontendService, "run_initialization", return_value=True),
+                    patch.object(svc.ActionsService, "run_initialization", return_value=True),
+                ):
+                    out = mgr.run()
+        return out, fake_container
+
+    def test_leader_blocks_on_drift_and_still_replans(self, charm_ctx, base_state):
+        """Drift the leader could not repair needs an operator, but the workload stays planned."""
+        error = exceptions.BackendDriftError("upgrade job did not restore: missing Kafka topics: X")
+        out, container = self._reconcile(charm_ctx, base_state, leader=True, gms_error=error)
+
+        assert out.unit_status == testing.BlockedStatus(str(error))
+        assert container.add_layer.call_count == len(svc.AbstractService.__subclasses__())
+        container.replan.assert_called()
+
+    def test_follower_waits_on_drift(self, charm_ctx, base_state):
+        """A follower reports drift as a wait for the leader's repair."""
+        error = exceptions.BackendDriftError("waiting for the leader to restore: missing Kafka topics: X")
+        out, container = self._reconcile(charm_ctx, base_state, leader=False, gms_error=error)
+
+        assert out.unit_status == testing.WaitingStatus(str(error))
+        container.replan.assert_called()
+
+    def test_running_job_is_maintenance(self, charm_ctx, base_state):
+        """The charm is doing work while the upgrade job runs."""
+        error = exceptions.BackendRestoringError("upgrade job running: missing Kafka topics: X")
+        out, container = self._reconcile(charm_ctx, base_state, leader=True, gms_error=error)
+
+        assert out.unit_status == testing.MaintenanceStatus(str(error))
+        container.replan.assert_called()
+
+    def test_gms_is_not_planned_while_the_job_holds_it(self, charm_ctx, base_state):
+        """A GMS that is not running yet is started only after the upgrade job exits."""
+        error = exceptions.BackendRestoringError("upgrade job running: backend not provisioned")
+        _, container = self._reconcile(charm_ctx, base_state, leader=True, gms_error=error, gms_held=True)
+
+        planned = [c.args[0] for c in container.add_layer.call_args_list]
+        assert svc.GMSService.name not in planned
+        assert len(planned) == len(svc.AbstractService.__subclasses__()) - 1
+
+    def test_failed_job_pebble_retries_waits(self, charm_ctx, base_state):
+        """A failed run that pebble will rerun resolves without an operator."""
+        error = exceptions.BackendRetryingError("upgrade job failed (exit 1), pebble retries it: X")
+        out, container = self._reconcile(charm_ctx, base_state, leader=True, gms_error=error)
+
+        assert out.unit_status == testing.WaitingStatus(str(error))
+        container.replan.assert_called()
+
+    def test_unreachable_backend_waits(self, charm_ctx, base_state):
+        """A backend that cannot be queried is a wait, not a block."""
+        error = exceptions.BackendUnreachableError("cannot query Kafka: KafkaTimeoutError")
+        out, container = self._reconcile(charm_ctx, base_state, leader=True, gms_error=error)
+
+        assert out.unit_status == testing.WaitingStatus(str(error))
+        container.replan.assert_called()
+
+    def test_active_without_backend_problems(self, charm_ctx, base_state):
+        """No drift reported means the reconcile ends Active as before."""
+        out, _ = self._reconcile(charm_ctx, base_state, leader=True, gms_error=None)
+
+        assert out.unit_status == testing.ActiveStatus()
+
+
+class TestUpgradeNotice:
+    """The upgrade job's exit notice wakes the charm."""
+
+    @pytest.mark.parametrize("key, reconciled", [(literals.UPGRADE_NOTICE_KEY, True), ("example.com/other", False)])
+    def test_only_the_upgrade_notice_reconciles(self, charm_ctx, base_state, key, reconciled):
+        """A notice with another key is ignored."""
+        notice = testing.Notice(key=key)
+        container = testing.Container(svc.GMSService.name, can_connect=True, notices=[notice])
+        state = testing.State(config=base_state.config, containers={container})
+
+        with patch.object(DatahubK8SOperatorCharm, "reconcile") as reconcile:
+            charm_ctx.run(charm_ctx.on.pebble_custom_notice(container, notice), state)
+
+        assert reconcile.called is reconciled
+
+
+class TestUpdateStatusPlanCheck:
+    """update-status compares each workload's plan without the upgrade job, and reports health.
+
+    Attributes:
+        LAYER: The layer the charm expects for GMS.
+        PLANNED: The GMS container's plan, holding the upgrade service as well.
+    """
+
+    LAYER = {"services": {svc.GMSService.name: {"command": "start.sh"}}}
+    PLANNED = {"services": {**LAYER["services"], literals.UPGRADE_SERVICE_NAME: {"command": "run-upgrade.sh"}}}
+
+    def _update_status(self, charm_ctx, base_state, *, check_status, status_after_reconcile=None):
+        """Run update-status with the upgrade job planned and the `up` check at ``check_status``.
+
+        Returns:
+            The output of the run and the reconcile mock.
+        """
+        container = MagicMock()
+        container.can_connect.return_value = True
+        container.get_check.return_value = SimpleNamespace(status=check_status, failures=3)
+        container.get_plan.return_value.to_dict.side_effect = lambda: json.loads(json.dumps(self.PLANNED))
+
+        with charm_ctx(charm_ctx.on.update_status(), base_state) as mgr:
+
+            def _reconcile():
+                """Stand in for reconcile(), which ends by setting the unit status."""
+                mgr.charm.unit.status = status_after_reconcile or ops.ActiveStatus()
+
+            with (
+                patch.object(mgr.charm, "_refresh_ingress_addresses"),
+                patch.object(mgr.charm, "_check_state"),
+                patch.object(mgr.charm, "reconcile", side_effect=_reconcile) as reconcile,
+                patch.object(mgr.charm.unit, "get_container", return_value=container),
+                patch("charm.get_pebble_layer", return_value=self.LAYER),
+                patch.object(svc.GMSService, "is_enabled", return_value=True),
+                patch.object(svc.FrontendService, "is_enabled", return_value=True),
+            ):
+                out = mgr.run()
+        return out, reconcile
+
+    def test_upgrade_service_does_not_put_the_plan_out_of_sync(self, charm_ctx, base_state, caplog):
+        """The job's service in the GMS container's plan is not a difference to repair."""
+        out, reconcile = self._update_status(charm_ctx, base_state, check_status=ops.pebble.CheckStatus.UP)
+
+        assert "invalid plan" not in caplog.text
+        reconcile.assert_called_once()
+        assert out.unit_status == testing.ActiveStatus()
+
+    def test_down_service_is_reported_with_the_job_planned(self, charm_ctx, base_state):
+        """A failing check is still evaluated, so the unit reports the service down."""
+        out, reconcile = self._update_status(charm_ctx, base_state, check_status=ops.pebble.CheckStatus.DOWN)
+
+        reconcile.assert_called_once()
+        assert out.unit_status == testing.MaintenanceStatus("status check: DOWN")
+
+    def test_down_service_still_reconciles_the_backends(self, charm_ctx, base_state):
+        """A GMS that cannot start may need the upgrade job, so the reconcile still runs.
+
+        Its backend status is more specific than DOWN and is kept.
+        """
+        blocked = ops.BlockedStatus("upgrade job ran but did not restore: X")
+        out, reconcile = self._update_status(
+            charm_ctx, base_state, check_status=ops.pebble.CheckStatus.DOWN, status_after_reconcile=blocked
+        )
+
+        reconcile.assert_called_once()
+        assert out.unit_status == testing.BlockedStatus("upgrade job ran but did not restore: X")
+
+
+class TestReconcileTriggers:
+    """Events that must re-evaluate the backends and health outside update-status."""
+
+    def test_leader_elected_reconciles(self, charm_ctx, base_state):
+        """A new leader takes over the upgrade job at once."""
+        state = testing.State(config=base_state.config, leader=True)
+        with patch.object(DatahubK8SOperatorCharm, "reconcile") as reconcile:
+            charm_ctx.run(charm_ctx.on.leader_elected(), state)
+        reconcile.assert_called_once()
+
+    @pytest.mark.parametrize("event", ["pebble_check_failed", "pebble_check_recovered"])
+    def test_gms_check_changes_rerun_the_status_check(self, charm_ctx, base_state, event):
+        """A GMS check failing or recovering re-runs the update-status evaluation."""
+        check = testing.CheckInfo("up", status=ops.pebble.CheckStatus.DOWN, failures=30, threshold=30)
+        layer = ops.pebble.Layer({"checks": {"up": {"override": "replace", "threshold": 30, "http": {"url": "x"}}}})
+        container = testing.Container(svc.GMSService.name, can_connect=True, layers={"gms": layer}, check_infos={check})
+        state = testing.State(config=base_state.config, containers={container})
+        with (
+            patch.object(DatahubK8SOperatorCharm, "_refresh_ingress_addresses") as refresh,
+            patch.object(DatahubK8SOperatorCharm, "_check_state", side_effect=exceptions.UnreadyStateError("stop")),
+        ):
+            charm_ctx.run(getattr(charm_ctx.on, event)(container, check), state)
+        refresh.assert_called_once()
