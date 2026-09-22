@@ -115,10 +115,11 @@ def opensearch_drift(
     """Describe what OpenSearch is missing compared to a completed SystemUpdate.
 
     SystemUpdate builds one search index per entity in the registry, named
-    ``<prefix>_<entity>index_v2``, and gives each one DataHub's analysis settings. When something
-    writes to a missing index, OpenSearch creates it automatically without those settings, and
-    search against it fails. Only the registry's index names are checked, so indices that belong
-    to other applications in a shared cluster are never reported.
+    ``<prefix>_<entity>index_v2``, and gives each one DataHub's analysis settings. Search against
+    a missing index fails. When something writes to a missing index, OpenSearch creates it
+    automatically without those settings, and search against it fails too. Only the registry's
+    index names are checked, so indices that belong to other applications in a shared cluster
+    are never reported.
 
     Args:
         connection: OpenSearch relation connection details.
@@ -143,12 +144,17 @@ def opensearch_drift(
         ca_file.flush()
         try:
             resolved = requests.get(
-                f"{base_url}/_resolve/index/{','.join(sentinels)}",
+                f"{base_url}/_resolve/index/{','.join(sentinels + entity_indices)}",
                 auth=auth,
                 verify=ca_file.name,
                 timeout=literals.OPENSEARCH_PROBE_TIMEOUT_SECONDS,
             )
             resolved.raise_for_status()
+            # OpenSearch replies with the names that it found, in three groups: "indices",
+            # "aliases" and "data_streams". It leaves a name out when that name does not exist,
+            # so a name missing from this set is missing from the cluster. An index that
+            # BuildIndices reindexed keeps its old name as an alias, and OpenSearch lists that
+            # alias under the old name, so the probe still counts the index as present.
             present = {entry["name"] for entries in resolved.json().values() for entry in entries}
             unmapped: List[str] = []
             if entity_indices:
@@ -172,7 +178,7 @@ def opensearch_drift(
             raise exceptions.BackendUnreachableError(f"unexpected response from OpenSearch: {e!r}") from e
 
     drift = []
-    missing = [name for name in sentinels if name not in present]
+    missing = [name for name in sentinels + entity_indices if name not in present]
     if missing:
         drift.append(f"missing OpenSearch indices: {', '.join(missing)}")
     if unmapped:

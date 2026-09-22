@@ -16,6 +16,9 @@ import exceptions
 import literals
 
 HISTORY = "DataHubUpgradeHistory_v1"
+# Stands for the rock's `version`, which the probe matches the history record against.
+VERSION = "1.2.3.4"
+OLDER_VERSION = "1.2.3.3"
 TOPICS = {"MetadataChangeProposal_v1", "PlatformEvent_v1", HISTORY}
 KAFKA_CONN = {"bootstrap_server": "k1:9092,k2:9092", "username": "u", "password": "p"}  # nosec B105
 OS_CONN = {"host": "os", "port": "9200", "username": "u", "password": "p", "tls-ca": "PEM"}  # nosec B105
@@ -47,7 +50,7 @@ def _patch_kafka(topics, records):
 class TestKafkaDrift:
     """Tests for backend_probes.kafka_drift."""
 
-    def _drift(self, topics, records, version="1.4.0.5"):
+    def _drift(self, topics, records, version=VERSION):
         """Run kafka_drift against patched clients and return the drift and the consumer mock."""
         admin_patch, consumer_patch, consumer = _patch_kafka(topics, records)
         with admin_patch, consumer_patch:
@@ -55,33 +58,33 @@ class TestKafkaDrift:
 
     def test_no_drift_when_topics_exist_and_latest_record_matches(self):
         """Nothing to report once SystemUpdate has run for the current version."""
-        drift, _ = self._drift(TOPICS, [_history_record("v1.4.0.4-0"), _history_record("v1.4.0.5-0")])
+        drift, _ = self._drift(TOPICS, [_history_record(f"v{OLDER_VERSION}-0"), _history_record(f"v{VERSION}-0")])
         assert not drift
 
     def test_reads_only_the_latest_record(self):
         """The consumer is positioned on the last offset of the history topic."""
-        _, consumer = self._drift(TOPICS, [_history_record("v1.4.0.4-0"), _history_record("v1.4.0.5-0")])
+        _, consumer = self._drift(TOPICS, [_history_record(f"v{OLDER_VERSION}-0"), _history_record(f"v{VERSION}-0")])
         consumer.seek.assert_called_once_with(TopicPartition(HISTORY, 0), 1)
 
     def test_missing_topics_are_reported(self):
         """Topics deleted after the bootstrap are listed by name."""
-        drift, _ = self._drift({HISTORY}, [_history_record("v1.4.0.5-0")])
+        drift, _ = self._drift({HISTORY}, [_history_record(f"v{VERSION}-0")])
         assert drift == ["missing Kafka topics: MetadataChangeProposal_v1, PlatformEvent_v1"]
 
     def test_record_for_another_version_is_drift(self):
         """A rock bump leaves only the previous version's record, which GMS will not accept."""
-        drift, _ = self._drift(TOPICS, [_history_record("v1.4.0.5-0")], version="1.5.0.1")
-        assert drift == [f"no v1.5.0.1 record in {HISTORY}"]
+        drift, _ = self._drift(TOPICS, [_history_record(f"v{VERSION}-0")], version="9.9.9.9")
+        assert drift == [f"no v9.9.9.9 record in {HISTORY}"]
 
     def test_version_prefix_does_not_match_a_longer_version(self):
-        """v1.4.0.5 must not be satisfied by a v1.4.0.50 record."""
-        drift, _ = self._drift(TOPICS, [_history_record("v1.4.0.50-0")])
-        assert drift == [f"no v1.4.0.5 record in {HISTORY}"]
+        """A version must not be satisfied by a record whose version starts with it."""
+        drift, _ = self._drift(TOPICS, [_history_record(f"v{VERSION}0-0")])
+        assert drift == [f"no v{VERSION} record in {HISTORY}"]
 
     def test_empty_history_topic_is_drift(self):
         """A recreated, empty history topic leaves GMS waiting at startup."""
         drift, consumer = self._drift(TOPICS, [])
-        assert drift == [f"no v1.4.0.5 record in {HISTORY}"]
+        assert drift == [f"no v{VERSION} record in {HISTORY}"]
         consumer.poll.assert_not_called()
 
     def test_unknown_version_skips_the_record_check(self):
@@ -94,7 +97,7 @@ class TestKafkaDrift:
         """A client failure is reported as an unreachable backend, not as drift."""
         with patch.object(backend_probes, "KafkaAdminClient", side_effect=KafkaTimeoutError("Unable to bootstrap")):
             with pytest.raises(exceptions.BackendUnreachableError):
-                backend_probes.kafka_drift(KAFKA_CONN, TOPICS, HISTORY, "1.4.0.5")
+                backend_probes.kafka_drift(KAFKA_CONN, TOPICS, HISTORY, VERSION)
 
 
 class TestKafkaSocketErrors:
@@ -104,7 +107,7 @@ class TestKafkaSocketErrors:
         """kafka-python can surface a raw socket error on connect."""
         with patch.object(backend_probes, "KafkaAdminClient", side_effect=OSError("network unreachable")):
             with pytest.raises(exceptions.BackendUnreachableError):
-                backend_probes.kafka_drift(KAFKA_CONN, TOPICS, HISTORY, "1.4.0.5")
+                backend_probes.kafka_drift(KAFKA_CONN, TOPICS, HISTORY, VERSION)
 
 
 class TestOpenSearchDrift:
@@ -112,18 +115,24 @@ class TestOpenSearchDrift:
 
     Attributes:
         ENTITIES: Entity names passed as the registry.
+        BUILT: Every index name that SystemUpdate creates for ENTITIES.
     """
 
     ENTITIES = ("dataset", "tag")
+    BUILT = (*literals.OPENSEARCH_SENTINELS, "datasetindex_v2", "tagindex_v2")
 
     @staticmethod
     def _response(body):
         """Return a successful fake HTTP response carrying ``body``."""
         return SimpleNamespace(json=lambda: body, raise_for_status=lambda: None)
 
-    def _drift(self, present, settings, prefix=None, entities=ENTITIES):
-        """Run opensearch_drift with ``present`` names resolved and ``settings`` returned."""
-        resolved = {"indices": [{"name": n} for n in present], "aliases": [], "data_streams": []}
+    def _drift(self, present, settings, *, prefix=None, entities=ENTITIES, aliases=()):
+        """Run opensearch_drift with ``present`` and ``aliases`` resolved to ``settings``."""
+        resolved = {
+            "indices": [{"name": n} for n in present],
+            "aliases": [{"name": n, "indices": [f"{n}_1789995491992"]} for n in aliases],
+            "data_streams": [],
+        }
         with patch.object(
             backend_probes.requests, "get", side_effect=[self._response(resolved), self._response(settings)]
         ) as mock_get:
@@ -136,19 +145,31 @@ class TestOpenSearchDrift:
 
     def test_no_drift_when_sentinels_exist_and_indices_are_mapped(self):
         """Nothing to report on a backend SystemUpdate has built."""
-        drift, _ = self._drift(literals.OPENSEARCH_SENTINELS, self._analysed("datasetindex_v2", "tagindex_v2"))
+        drift, _ = self._drift(self.BUILT, self._analysed("datasetindex_v2", "tagindex_v2"))
+        assert not drift
+
+    def test_missing_entity_index_is_reported(self):
+        """A deleted entity index that nothing wrote to again breaks search on that type."""
+        present = [n for n in self.BUILT if n != "tagindex_v2"]
+        drift, _ = self._drift(present, self._analysed("datasetindex_v2"))
+        assert drift == ["missing OpenSearch indices: tagindex_v2"]
+
+    def test_entity_index_behind_an_alias_is_present(self):
+        """After a reindex, BuildIndices keeps the old index name as an alias."""
+        present = [n for n in self.BUILT if n != "tagindex_v2"]
+        drift, _ = self._drift(present, self._analysed("datasetindex_v2"), aliases=["tagindex_v2"])
         assert not drift
 
     def test_missing_sentinels_are_reported(self):
         """A replaced or wiped cluster lacks the indices SystemUpdate always creates."""
-        drift, _ = self._drift([], {})
+        drift, _ = self._drift([], {}, entities=None)
         assert drift == [f"missing OpenSearch indices: {', '.join(literals.OPENSEARCH_SENTINELS)}"]
 
     def test_auto_created_index_is_reported(self):
         """An index created by a write to a missing index has no DataHub analysis settings."""
         settings = self._analysed("datasetindex_v2")
         settings["tagindex_v2"] = {"settings": {"index": {"provided_name": "tagindex_v2"}}}
-        drift, _ = self._drift(literals.OPENSEARCH_SENTINELS, settings)
+        drift, _ = self._drift(self.BUILT, settings)
         assert drift == ["OpenSearch indices without DataHub mappings: tagindex_v2"]
 
     def test_only_registry_entity_indices_are_checked(self):
@@ -168,7 +189,7 @@ class TestOpenSearchDrift:
 
     def test_index_prefix_is_applied(self):
         """Sentinels and entity index names carry the configured prefix."""
-        present = [f"dh_{n}" for n in literals.OPENSEARCH_SENTINELS]
+        present = [f"dh_{n}" for n in self.BUILT]
         drift, mock_get = self._drift(present, {}, prefix="dh")
         assert not drift
         resolve_url = mock_get.call_args_list[0].args[0]
