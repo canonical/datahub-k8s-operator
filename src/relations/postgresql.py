@@ -3,6 +3,7 @@
 
 """Define DataHub-Postgresql relation."""
 
+from functools import cached_property
 from typing import Dict, Optional
 
 from ops import framework
@@ -13,8 +14,8 @@ import literals
 class PostgresqlRelation(framework.Object):
     """Client for datahub:postgresql relations.
 
-    Stateless: connection details are read live from the data_platform_libs
-    requirer rather than cached in peer data.
+    Stateless: connection details are read from the data_platform_libs requirer once per
+    hook and are never kept in peer data.
 
     Attributes:
         charm: The charm this relation is attached to.
@@ -34,7 +35,7 @@ class PostgresqlRelation(framework.Object):
         charm.framework.observe(charm.db.on.endpoints_changed, self._on_database_changed)
         charm.framework.observe(charm.on.db_relation_broken, self._on_relation_broken)
 
-    @property
+    @cached_property
     def connection(self) -> Optional[Dict[str, str]]:
         """Return the current database connection details, or None when unrelated.
 

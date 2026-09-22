@@ -7,6 +7,7 @@
 import json
 import logging
 import secrets
+from functools import cached_property
 from typing import Dict, List, Type, Union
 from urllib.parse import urlparse
 
@@ -201,9 +202,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """Return the DataHub system client identifier."""
         return literals.SYSTEM_CLIENT_ID
 
-    @property
+    @cached_property
     def system_client_secret(self) -> str:
-        """Return the DataHub system client secret."""
+        """Return the DataHub system client secret, read once per hook."""
         return self._get_or_create_system_client_secret()
 
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
