@@ -157,6 +157,29 @@ config:
         Useful when several DataHub deployments share a Kafka cluster.
       type: string
 
+    kafka-topic-retention:
+      description: |
+        JSON object with the retention of DataHub's Kafka topics, applied by the
+        charm to the topics that already exist. Keys are topic names without the
+        `kafka-topic-prefix`: "metadata-change-proposal",
+        "failed-metadata-change-proposal", "metadata-change-log-versioned",
+        "metadata-change-log-timeseries", "platform-event" and "usage-event".
+        Each value is an object with "retention-ms" and/or "retention-bytes",
+        for example: '{"metadata-change-proposal": {"retention-ms": 259200000}}'.
+
+        A topic or setting left out of the value keeps its default above: 7 days
+        for every topic except "metadata-change-log-timeseries", which keeps
+        DataHub's 90 days, and no size limit. DataHub's consumers must read a
+        message before it expires, so keep "retention-ms" longer than any
+        outage of DataHub.
+        "retention-bytes" applies per partition, and Kafka only deletes a whole
+        segment once it is closed, so a partition can hold up to "retention-bytes"
+        plus one segment (1 GB by default).
+
+        The upgrade history topic is not managed: GMS needs its records to start.
+      type: string
+      default: '{"metadata-change-proposal": {"retention-ms": 604800000}, "failed-metadata-change-proposal": {"retention-ms": 604800000}, "metadata-change-log-versioned": {"retention-ms": 604800000}, "metadata-change-log-timeseries": {"retention-ms": 7776000000}, "platform-event": {"retention-ms": 604800000}, "usage-event": {"retention-ms": 604800000}}'
+
     opensearch-index-prefix:
       description: |
         Prefix for the names of OpenSearch indices created and used by DataHub.

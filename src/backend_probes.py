@@ -1,7 +1,7 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Probe DataHub's backends to check the results of the SystemUpdate job."""
+"""Probe DataHub's backends for the results of the SystemUpdate job, and set topic retention."""
 
 import logging
 import tempfile
@@ -9,7 +9,12 @@ from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 import requests
-from kafka.admin import KafkaAdminClient
+from kafka.admin import (
+    AlterConfigOp,
+    ConfigResource,
+    ConfigResourceType,
+    KafkaAdminClient,
+)
 from kafka.consumer import KafkaConsumer
 from kafka.errors import KafkaError
 from kafka.structs import TopicPartition
@@ -135,6 +140,62 @@ def kafka_drift(
         return drift
     except (KafkaError, OSError) as e:
         raise exceptions.BackendUnreachableError(f"cannot query Kafka: {e}") from e
+
+
+def kafka_set_retention(connection: Dict[str, str], retention: Dict[str, Dict[str, Optional[str]]]) -> List[str]:
+    """Set the retention configs of the topics that exist, and leave their other configs alone.
+
+    Args:
+        connection: Kafka relation connection details.
+        retention: For each topic, the value of each retention config to set. None removes the
+            topic's own value, so that the broker default applies.
+
+    Returns:
+        One description per topic that was changed.
+
+    Raises:
+        BackendUnreachableError: If Kafka cannot be queried or rejects a change.
+    """
+    try:
+        admin = KafkaAdminClient(**_kafka_config(connection))
+        try:
+            topics = sorted(set(retention) & set(admin.list_topics()))
+            if not topics:
+                return []
+            described = admin.describe_configs(
+                [ConfigResource(ConfigResourceType.TOPIC, topic, list(retention[topic])) for topic in topics]
+            ).get("topic", {})
+            changes = {}
+            for topic in topics:
+                # `describe_configs` filters on `modified` by default, so it returns the
+                # values that are set on the topic and not the ones it inherits from the broker.
+                current = {key: config["value"] for key, config in described.get(topic, {}).items()}
+                updates = {
+                    key: (AlterConfigOp.SET, value) if value is not None else (AlterConfigOp.DELETE, None)
+                    for key, value in retention[topic].items()
+                    if current.get(key) != value
+                }
+                if updates:
+                    changes[topic] = updates
+            if not changes:
+                return []
+            results = admin.alter_configs(
+                [ConfigResource(ConfigResourceType.TOPIC, topic, updates) for topic, updates in changes.items()],
+                incremental=True,
+            ).get("topic", {})
+        finally:
+            admin.close()
+    except (KafkaError, OSError) as e:
+        raise exceptions.BackendUnreachableError(f"cannot set Kafka topic retention: {e}") from e
+
+    failed = {topic: result for topic, result in results.items() if result != "OK"}
+    if failed:
+        raise exceptions.BackendUnreachableError(f"cannot set Kafka topic retention: {failed}")
+    return [
+        f"{topic}: "
+        + ", ".join(f"{key}={value}" if value is not None else f"{key} removed" for key, (_, value) in updates.items())
+        for topic, updates in sorted(changes.items())
+    ]
 
 
 def opensearch_drift(

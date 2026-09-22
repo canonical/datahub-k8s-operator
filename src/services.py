@@ -25,6 +25,7 @@ import backend_probes
 import exceptions
 import literals
 import utils
+from structured_config import parse_kafka_topic_retention
 
 if TYPE_CHECKING:
     from charm import DatahubK8SOperatorCharm  # noqa
@@ -801,6 +802,7 @@ class GMSService(AbstractService):
             raise exceptions.BackendRestoringError("upgrade job running")
 
         drift = cls._backend_drift(context, container)
+        cls._set_kafka_retention(context)
         last_exit = cls._upgrade_last_exit(container) if job is not None else None
         needs_bootstrap = not backend_provisioned and last_exit != 0 and not cls._workload_is_running(container)
         if not drift and not needs_bootstrap:
@@ -816,6 +818,27 @@ class GMSService(AbstractService):
         logger.info("Starting the upgrade job: %s", reason)
         cls._start_upgrade(context, container)
         raise exceptions.BackendRestoringError(f"upgrade job running: {reason}")
+
+    @classmethod
+    def _set_kafka_retention(cls, context: ServiceContext) -> None:
+        """Apply `kafka-topic-retention` to the DataHub topics that exist.
+
+        A topic that is still missing gets its retention at the reconcile after the upgrade
+        job has created it.
+
+        Args:
+            context: Context for the service.
+        """
+        names = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
+        retention = {
+            names[literals.KAFKA_RETENTION_TOPICS[topic]]: {
+                config: str(settings[key]) if key in settings else None
+                for key, config in literals.KAFKA_RETENTION_KEYS.items()
+            }
+            for topic, settings in parse_kafka_topic_retention(context.charm.config.kafka_topic_retention).items()
+        }
+        for change in backend_probes.kafka_set_retention(context.charm.kafka_relation.connection, retention):
+            logger.info("Set Kafka topic retention: %s", change)
 
     @classmethod
     def _backend_drift(cls, context: ServiceContext, container) -> List[str]:
