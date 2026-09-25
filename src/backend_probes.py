@@ -5,6 +5,7 @@
 
 import logging
 import tempfile
+from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 import requests
@@ -19,27 +20,54 @@ import literals
 logging.getLogger("kafka").setLevel(logging.ERROR)
 
 
-def _kafka_config(connection: Dict[str, str]) -> Dict:
-    """Build kafka-python client settings matching the GMS Kafka client.
+@dataclass(frozen=True)
+class KafkaClientConfig:
+    """kafka-python client settings matching the GMS Kafka client.
 
-    Args:
-        connection: Kafka relation connection details.
-
-    Returns:
-        Keyword arguments for kafka-python clients.
+    Attributes:
+        bootstrap_servers: Broker addresses to bootstrap from.
+        sasl_plain_username: SASL username.
+        sasl_plain_password: SASL password, left out of the repr so that it is never logged.
+        security_protocol: Kafka security protocol.
+        sasl_mechanism: SASL mechanism.
+        request_timeout_ms: Timeout for each request.
+        bootstrap_timeout_ms: Timeout for the first connection to the brokers.
     """
-    return {
-        "bootstrap_servers": connection["bootstrap_server"].split(","),
-        "security_protocol": "SASL_PLAINTEXT",
-        "sasl_mechanism": "SCRAM-SHA-512",
-        "sasl_plain_username": connection["username"],
-        "sasl_plain_password": connection["password"],
-        "request_timeout_ms": literals.KAFKA_PROBE_TIMEOUT_MS,
-        "bootstrap_timeout_ms": literals.KAFKA_PROBE_TIMEOUT_MS,
-    }
+
+    bootstrap_servers: List[str]
+    sasl_plain_username: str
+    sasl_plain_password: str = field(repr=False)
+    security_protocol: str = "SASL_PLAINTEXT"
+    sasl_mechanism: str = "SCRAM-SHA-512"
+    request_timeout_ms: int = literals.KAFKA_PROBE_TIMEOUT_MS
+    bootstrap_timeout_ms: int = literals.KAFKA_PROBE_TIMEOUT_MS
+
+    @classmethod
+    def from_connection(cls, connection: Dict[str, str]) -> "KafkaClientConfig":
+        """Build the settings from the Kafka relation's connection details.
+
+        Args:
+            connection: Kafka relation connection details.
+
+        Returns:
+            The client settings.
+        """
+        return cls(
+            bootstrap_servers=connection["bootstrap_server"].split(","),
+            sasl_plain_username=connection["username"],
+            sasl_plain_password=connection["password"],
+        )
+
+    def kwargs(self) -> Dict:
+        """Return the settings as keyword arguments for the kafka-python clients.
+
+        Returns:
+            Keyword arguments for ``KafkaAdminClient`` and ``KafkaConsumer``.
+        """
+        return asdict(self)
 
 
-def _latest_records(config: Dict, topic: str) -> List[bytes]:
+def _latest_records(config: KafkaClientConfig, topic: str) -> List[bytes]:
     """Return the value of the last record in each non-empty partition of a topic.
 
     Args:
@@ -49,7 +77,7 @@ def _latest_records(config: Dict, topic: str) -> List[bytes]:
     Returns:
         The latest record values.
     """
-    consumer = KafkaConsumer(**config, enable_auto_commit=False)
+    consumer = KafkaConsumer(**config.kwargs(), enable_auto_commit=False)
     try:
         partitions = [TopicPartition(topic, p) for p in consumer.partitions_for_topic(topic) or ()]
         consumer.assign(partitions)
@@ -88,9 +116,9 @@ def kafka_drift(
     Raises:
         BackendUnreachableError: If Kafka cannot be queried.
     """
-    config = _kafka_config(connection)
+    config = KafkaClientConfig.from_connection(connection)
     try:
-        admin = KafkaAdminClient(**config)
+        admin = KafkaAdminClient(**config.kwargs())
         try:
             existing = set(admin.list_topics())
         finally:

@@ -47,6 +47,32 @@ def _patch_kafka(topics, records):
     )
 
 
+class TestKafkaClientConfig:
+    """Tests for backend_probes.KafkaClientConfig."""
+
+    def test_clients_get_the_gms_settings(self):
+        """Both clients connect to every broker with the GMS protocol and credentials."""
+        admin_patch, consumer_patch, _ = _patch_kafka(TOPICS, [])
+        with admin_patch as admin, consumer_patch as consumer:
+            backend_probes.kafka_drift(KAFKA_CONN, TOPICS, HISTORY, VERSION)
+        expected = {
+            "bootstrap_servers": ["k1:9092", "k2:9092"],
+            "sasl_plain_username": KAFKA_CONN["username"],
+            "sasl_plain_password": KAFKA_CONN["password"],
+            "security_protocol": "SASL_PLAINTEXT",
+            "sasl_mechanism": "SCRAM-SHA-512",
+            "request_timeout_ms": literals.KAFKA_PROBE_TIMEOUT_MS,
+            "bootstrap_timeout_ms": literals.KAFKA_PROBE_TIMEOUT_MS,
+        }
+        admin.assert_called_once_with(**expected)
+        consumer.assert_called_once_with(**expected, enable_auto_commit=False)
+
+    def test_password_is_not_in_the_repr(self):
+        """A logged config does not leak the password."""
+        config = backend_probes.KafkaClientConfig.from_connection(KAFKA_CONN)
+        assert "sasl_plain_password" not in repr(config)
+
+
 class TestKafkaDrift:
     """Tests for backend_probes.kafka_drift."""
 
