@@ -157,7 +157,7 @@ def kafka_set_retention(connection: Dict[str, str], retention: Dict[str, Dict[st
         BackendUnreachableError: If Kafka cannot be queried or rejects a change.
     """
     try:
-        admin = KafkaAdminClient(**_kafka_config(connection))
+        admin = KafkaAdminClient(**KafkaClientConfig.from_connection(connection).kwargs())
         try:
             topics = sorted(set(retention) & set(admin.list_topics()))
             if not topics:
