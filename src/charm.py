@@ -114,6 +114,12 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         # Services
         for service in SERVICES:
             self.framework.observe(self.on[service.name].pebble_ready, self._on_pebble_ready)
+            if service.healthcheck is not None:
+                # Re-evaluate health as soon as it changes rather than at the next update-status.
+                self.framework.observe(self.on[service.name].pebble_check_failed, self._on_update_status)
+                self.framework.observe(self.on[service.name].pebble_check_recovered, self._on_update_status)
+        self.framework.observe(self.on[services.GMSService.name].pebble_custom_notice, self._on_pebble_custom_notice)
+        self.framework.observe(self.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.secret_changed, self._on_secret_changed)
         self.framework.observe(self.on.peer_relation_changed, self._on_peer_relation_changed)
@@ -207,6 +213,23 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             event: Event instance being handled.
         """
         self.reconcile()
+
+    def _on_leader_elected(self, event: ops.LeaderElectedEvent):
+        """Handle leader-elected event; the new leader takes over repairing the backends.
+
+        Args:
+            event: Event instance being handled.
+        """
+        self.reconcile()
+
+    def _on_pebble_custom_notice(self, event: ops.PebbleCustomNoticeEvent):
+        """Reconcile when the upgrade job exits.
+
+        Args:
+            event: Event instance being handled.
+        """
+        if event.notice.key == literals.UPGRADE_NOTICE_KEY:
+            self.reconcile()
 
     def _on_reindex_action(self, event):
         """Run the 'RestoreIndices' command in 'datahub-upgrade' container.
@@ -333,6 +356,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 break  # guaranteed replan, exit loop
             else:
                 plan = container.get_plan().to_dict()
+                # The upgrade job shares the GMS container's plan but is planned on its own.
+                plan.get("services", {}).pop(literals.UPGRADE_SERVICE_NAME, None)
                 expected_plan = get_pebble_layer(service, context)
                 # `get_plan` returns a `dict` subclass that messes with comparison.
                 if dict(plan) != expected_plan:
@@ -352,8 +377,12 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             logger.info("services not ready, exiting to wait for the next update")
             self.unit.status = ops.MaintenanceStatus("status check: NOT READY")
         elif is_down:
-            logger.info("services down, exiting to wait for the next update")
-            self.unit.status = ops.MaintenanceStatus("status check: DOWN")
+            # Still reconcile. GMS may be down because a backend needs repair, and only the
+            # upgrade job can repair it.
+            logger.info("services down, reconciling before reporting them down")
+            self.reconcile()
+            if isinstance(self.unit.status, ops.ActiveStatus):
+                self.unit.status = ops.MaintenanceStatus("status check: DOWN")
         else:
             self.reconcile()
 
@@ -540,14 +569,29 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
 
         context = services.ServiceContext(self)
 
-        # Run initialization jobs.
+        # Run initialization jobs. Backend problems still let the services be
+        # planned, so the workload keeps running while they are reported.
+        backend_status = None
         try:
             for service in SERVICES:
                 container = self.unit.get_container(service.name)
                 if not container.can_connect():
                     logger.info("Cannot connect to service '%s', skipping initialization", service.name)
                     return
-                service.run_initialization(context)
+                try:
+                    service.run_initialization(context)
+                except exceptions.BackendDriftError as e:
+                    logger.warning("Backend drift: %s", str(e))
+                    # Only the leader repairs the backends; followers wait for it.
+                    backend_status = ops.BlockedStatus(str(e)) if self.unit.is_leader() else ops.WaitingStatus(str(e))
+                except exceptions.BackendRestoringError as e:
+                    backend_status = ops.MaintenanceStatus(str(e))
+                except exceptions.BackendRetryingError as e:
+                    logger.warning("Backend repair retrying: %s", str(e))
+                    backend_status = ops.WaitingStatus(str(e))
+                except exceptions.BackendUnreachableError as e:
+                    logger.warning("Backend unreachable: %s", str(e))
+                    backend_status = ops.WaitingStatus(str(e))
         except Exception as e:
             logger.error("Failed to initialize service '%s': %s", service.name, str(e))
             self.unit.status = ops.BlockedStatus(str(e))
@@ -559,6 +603,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             if not container.can_connect():
                 logger.info("Cannot connect to service '%s', skipping replan", service.name)
                 return
+            if service is services.GMSService and services.GMSService.is_waiting_for_upgrade(container):
+                logger.info("Not starting '%s' until the upgrade job exits", service.name)
+                continue
 
             pebble_layer = get_pebble_layer(service, context)
             container.add_layer(service.name, pebble_layer, combine=True)
@@ -572,7 +619,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         self._reconcile_trino_if_ready()
         self._reconcile_datahub_clients_if_ready()
 
-        self.unit.status = ops.ActiveStatus()
+        self.unit.status = backend_status or ops.ActiveStatus()
 
 
 if __name__ == "__main__":  # pragma: nocover

@@ -18,8 +18,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import urlparse
 
+import ops
 import yaml
 
+import backend_probes
 import exceptions
 import literals
 import utils
@@ -544,7 +546,7 @@ class GMSService(AbstractService):
         healthcheck: Optional dictionary for healthcheck configuration.
     """
 
-    name = "datahub-gms"
+    name = literals.GMS_SERVICE_NAME
     command = "/datahub/datahub-gms/scripts/start.sh"
     healthcheck = {
         "endpoint": "/health/live",
@@ -612,8 +614,12 @@ class GMSService(AbstractService):
             "MCE_CONSUMER_ENABLED": "true",  # still needed for the ingestion scheduler
             "MAE_CONSUMER_ENABLED": "true",
             "PE_CONSUMER_ENABLED": "true",
-            "ENTITY_REGISTRY_CONFIG_PATH": "/datahub/datahub-gms/resources/entity-registry.yml",
+            "ENTITY_REGISTRY_CONFIG_PATH": literals.ENTITY_REGISTRY_PATH,
             "DATAHUB_ANALYTICS_ENABLED": "true",
+            # Poll for the upgrade job's record at a fixed interval
+            "BOOTSTRAP_SYSTEM_UPDATE_INITIAL_BACK_OFF_MILLIS": str(literals.GMS_UPGRADE_POLL_MILLIS),
+            "BOOTSTRAP_SYSTEM_UPDATE_BACK_OFF_FACTOR": "1",
+            "BOOTSTRAP_SYSTEM_UPDATE_MAX_BACK_OFFS": str(literals.GMS_UPGRADE_POLL_ATTEMPTS),
             # PostgreSQL credentials.
             "EBEAN_DATASOURCE_USERNAME": db_conn["username"],
             "EBEAN_DATASOURCE_PASSWORD": db_conn["password"],
@@ -685,15 +691,29 @@ class GMSService(AbstractService):
         Args:
             context: Context for the service.
         """
-        container = context.charm.unit.get_container(cls.name)
+        version = cls._rock_version(context.charm.unit.get_container(cls.name))
+        if version is not None:
+            context.charm.unit.set_workload_version(version)
+
+    @classmethod
+    def _rock_version(cls, container) -> Optional[str]:
+        """Return the DataHub version from the GMS rock's rockcraft.yaml, or None if unreadable.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            The rock's `version`. It is also the DataHub release that the rock builds.
+        """
         try:
             meta_file = container.pull("/rockcraft.yaml")
             meta = yaml.safe_load(meta_file)
             if not meta or "version" not in meta:
                 raise ValueError("Cannot find 'version' in 'rockcraft.yaml'.")
-            context.charm.unit.set_workload_version(meta["version"])
+            return str(meta["version"])
         except Exception as e:
-            logger.warning("Could not set workload version: %s", str(e))
+            logger.warning("Could not read workload version: %s", str(e))
+            return None
 
     @classmethod
     def run_initialization(cls, context: ServiceContext) -> bool:
@@ -707,22 +727,18 @@ class GMSService(AbstractService):
         3. Truststore initialization for Opensearch SSL
         4. DataHub upgrade (SystemUpdate job, also handles Kafka topic creation)
 
-        Statelessness note: steps 1, 2 and 4 are one-time backend bootstrap, gated
-        on `_backend_is_provisioned` — a query against the backend's own state (the
-        root auth policy in `metadata_aspect_v2`), not on workload liveness. Step 4
-        carries a second gate: the marker lands minutes after the upgrade job
-        returns, so it is skipped while GMS is already running and finishing that
-        bootstrap, rather than being restarted from the top on every reconcile. This
-        runs the bootstrap on a fresh backend (so authenticated GraphQL works) and
-        skips the JVM-heavy upgrade on a rebuilt pod whose backends are intact.
-        The truststore import (step 3) is exempt: it is cheap and must self-heal
-        unconditionally.
+        Steps 1 and 2 run on the leader while `_backend_is_provisioned` is false. The truststore
+        import (step 3) is cheap and must self-heal, so it always runs. Step 4 is decided by
+        `_reconcile_upgrade` on the leader; followers only report drift.
 
         Args:
             context: Context for the service.
 
         Returns:
             If initialization scripts were run and were successful.
+
+        Raises:
+            BackendDriftError: If a follower finds drift for the leader to restore.
         """
         # Workload version is a safe read-only operation that doesn't require relations.
         cls._set_workload_version(context)
@@ -748,25 +764,218 @@ class GMSService(AbstractService):
         # Step 3: Truststore initialization (per-container, always runs)
         cls._run_truststore_init(context, container)
 
-        if not backend_provisioned and is_leader:
-            # Step 4: DataHub upgrade (SystemUpdate)
-            #
-            # The provisioning marker is only written once GMS has finished booting
-            # and run its own bootstrap steps, few minutes after the upgrade job
-            # returns. Any reconcile landing in that gap sees "not provisioned"
-            # again, so gating solely on the marker re-runs this JVM-heavy job while
-            # the previous bootstrap is still in flight. If GMS is already running,
-            # that bootstrap is underway: leave it alone and let the marker appear.
-            if cls._workload_is_running(container):
-                logger.info(
-                    "Backend not marked as provisioned yet, but '%s' is already running; "
-                    "skipping the upgrade job to let the in-flight bootstrap finish",
-                    cls.name,
-                )
-            else:
-                cls._run_upgrade(context, container)
+        # Step 4: DataHub upgrade (SystemUpdate)
+        if is_leader:
+            cls._reconcile_upgrade(context, container, backend_provisioned)
+            return True
 
+        # Stop any job this unit started while it was leader, so that only the leader runs it.
+        cls._stop_upgrade(container)
+        drift = cls._backend_drift(context, container)
+        if drift:
+            raise exceptions.BackendDriftError(f"waiting for the leader to restore: {'; '.join(drift)}")
         return True
+
+    @classmethod
+    def _reconcile_upgrade(cls, context: ServiceContext, container, backend_provisioned: bool) -> None:
+        """Keep the upgrade service up while the backends need the job, and report on it.
+
+        Pebble reruns the job after every exit, with backoff, until `_backend_drift` comes back
+        clean and this stops it. With the provisioning marker absent and GMS not running, the
+        job is also needed until a run in this container has succeeded, which bootstraps a
+        fresh or wiped Postgres; with GMS running, the bootstrap is in flight, since GMS writes
+        the marker on its first start.
+
+        Args:
+            context: Context for the service.
+            container: The GMS container reference.
+            backend_provisioned: Whether `_backend_is_provisioned` found the marker.
+
+        Raises:
+            BackendRestoringError: If the job is running or was just started.
+            BackendRetryingError: If the last run failed and pebble will rerun it.
+            BackendDriftError: If drift outlived a successful run, or pebble cannot start the job.
+        """
+        job = cls._upgrade_status(container)
+        if job == literals.PEBBLE_SERVICE_ACTIVE:
+            raise exceptions.BackendRestoringError("upgrade job running")
+
+        drift = cls._backend_drift(context, container)
+        last_exit = cls._upgrade_last_exit(container) if job is not None else None
+        needs_bootstrap = not backend_provisioned and last_exit != 0 and not cls._workload_is_running(container)
+        if not drift and not needs_bootstrap:
+            cls._stop_upgrade(container)
+            return
+        reason = "; ".join(drift) or "backend not provisioned"
+
+        if job == literals.PEBBLE_SERVICE_BACKOFF and not cls._upgrade_environment_changed(context, container):
+            if last_exit == 0:
+                raise exceptions.BackendDriftError(f"upgrade job ran but did not restore: {reason}")
+            raise exceptions.BackendRetryingError(f"upgrade job failed (exit {last_exit}), pebble retries it: {reason}")
+
+        logger.info("Starting the upgrade job: %s", reason)
+        cls._start_upgrade(context, container)
+        raise exceptions.BackendRestoringError(f"upgrade job running: {reason}")
+
+    @classmethod
+    def _backend_drift(cls, context: ServiceContext, container) -> List[str]:
+        """Describe what Kafka and OpenSearch lack compared to a completed SystemUpdate.
+
+        Args:
+            context: Context for the service.
+            container: The GMS container reference.
+
+        Returns:
+            One description per problem found, empty when both backends are in order.
+        """
+        topics = _kafka_topic_names(context.charm.config.kafka_topic_prefix)
+        drift = backend_probes.kafka_drift(
+            context.charm.kafka_relation.connection,
+            set(topics.values()),
+            topics["DATAHUB_UPGRADE_HISTORY_TOPIC_NAME"],
+            cls._rock_version(container),
+        )
+        drift += backend_probes.opensearch_drift(
+            context.charm.opensearch_relation.connection,
+            context.charm.config.opensearch_index_prefix,
+            cls._entity_names(container),
+        )
+        return drift
+
+    @classmethod
+    def _entity_names(cls, container) -> Optional[List[str]]:
+        """Return the entity names in the GMS rock's entity registry, or None if unreadable.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            The registry's entity names, each of which has an entity search index.
+        """
+        try:
+            registry = yaml.safe_load(container.pull(literals.ENTITY_REGISTRY_PATH))
+            return [entity["name"] for entity in registry["entities"]]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not read the entity registry: %s", str(e))
+            return None
+
+    @classmethod
+    def is_waiting_for_upgrade(cls, container) -> bool:
+        """Return True when GMS should not be started yet because the upgrade job is running.
+
+        At startup GMS waits for a record, which the job writes as its last step. So a GMS that
+        is not running yet is only started after the job has exited.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            Whether the upgrade job is running while GMS is not.
+        """
+        return cls._upgrade_status(container) == literals.PEBBLE_SERVICE_ACTIVE and not cls._workload_is_running(
+            container
+        )
+
+    @classmethod
+    def _upgrade_status(cls, container) -> Optional[str]:
+        """Return pebble's current status for the upgrade service, or None if it is not planned.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            The status, such as `active`, `backoff` or `inactive`.
+        """
+        service = container.get_services(literals.UPGRADE_SERVICE_NAME).get(literals.UPGRADE_SERVICE_NAME)
+        if service is None:
+            return None
+        current = service.current
+        return current.value if isinstance(current, ops.pebble.ServiceStatus) else current
+
+    @classmethod
+    def _upgrade_last_exit(cls, container) -> Optional[int]:
+        """Return the exit code of the upgrade job's last run in this container.
+
+        The job's script records it in the data of its exit notice.
+
+        Args:
+            container: The GMS container reference.
+
+        Returns:
+            The exit code, or None if no run has recorded one.
+        """
+        notices = container.get_notices(types=[ops.pebble.NoticeType.CUSTOM], keys=[literals.UPGRADE_NOTICE_KEY])
+        if not notices:
+            return None
+        try:
+            return int(notices[-1].last_data.get("rc", ""))
+        except ValueError:
+            return None
+
+    @classmethod
+    def _upgrade_environment_changed(cls, context: ServiceContext, container) -> bool:
+        """Return True when the planned upgrade service no longer has the current relation data.
+
+        Pebble reruns the job with the environment from its layer. If credentials rotate or a
+        relation changes, every rerun would use the old values and fail.
+
+        Args:
+            context: Context for the service.
+            container: The GMS container reference.
+
+        Returns:
+            Whether the planned environment differs from `_compile_upgrade_environment`.
+        """
+        service = container.get_plan().services.get(literals.UPGRADE_SERVICE_NAME)
+        return service is None or dict(service.environment) != cls._compile_upgrade_environment(context)
+
+    @classmethod
+    def _start_upgrade(cls, context: ServiceContext, container) -> None:
+        """Plan the upgrade service with the current relation data and (re)start it.
+
+        The layer is only replaced here, right before a start, so a replan of the container
+        in between runs finds it unchanged and does not start it. `restart` starts a stopped
+        service and cuts short a pending backoff.
+
+        Args:
+            context: Context for the service.
+            container: The GMS container reference.
+
+        Raises:
+            BackendDriftError: If pebble cannot start the job.
+        """
+        utils.push_contents_to_file(container, literals.UPGRADE_SCRIPT, literals.UPGRADE_SCRIPT_PATH, 0o755)
+        layer = {
+            "services": {
+                literals.UPGRADE_SERVICE_NAME: {
+                    "override": "replace",
+                    "summary": "DataHub SystemUpdate job",
+                    "command": f"/bin/bash {literals.UPGRADE_SCRIPT_PATH}",
+                    "startup": "disabled",
+                    "on-success": "restart",
+                    "on-failure": "restart",
+                    "backoff-delay": literals.UPGRADE_BACKOFF_DELAY,
+                    "backoff-limit": literals.UPGRADE_BACKOFF_LIMIT,
+                    "environment": cls._compile_upgrade_environment(context),
+                },
+            },
+        }
+        container.add_layer(literals.UPGRADE_SERVICE_NAME, layer, combine=True)
+        try:
+            container.restart(literals.UPGRADE_SERVICE_NAME)
+        except ops.pebble.ChangeError as e:
+            raise exceptions.BackendDriftError(f"upgrade job did not start: {e.err}") from e
+
+    @classmethod
+    def _stop_upgrade(cls, container) -> None:
+        """Stop the upgrade service if it is running or waiting to be retried.
+
+        Args:
+            container: The GMS container reference.
+        """
+        if cls._upgrade_status(container) in (literals.PEBBLE_SERVICE_ACTIVE, literals.PEBBLE_SERVICE_BACKOFF):
+            logger.info("Stopping the upgrade job")
+            container.stop(literals.UPGRADE_SERVICE_NAME)
 
     @classmethod
     def _workload_is_running(cls, container) -> bool:
@@ -787,11 +996,11 @@ class GMSService(AbstractService):
     def _backend_is_provisioned(cls, context: ServiceContext, container) -> bool:
         """Return True when the one-time DataHub backend bootstrap has completed.
 
-        Gates the expensive, JVM-heavy ``SystemUpdate`` (and the postgres/opensearch
-        setup) on the *backend's own state* rather than on workload liveness. The
-        marker is the root authorization policy ``urn:li:dataHubPolicy:0``: it is
-        written into ``metadata_aspect_v2`` as a ``dataHubPolicyKey`` aspect by
-        SystemUpdate, and is what authorizes the admin user's GraphQL session.
+        Gates the postgres/opensearch setup, and ``SystemUpdate`` alongside
+        `_backend_drift`, on a marker in the backend rather than on workload liveness.
+        The marker is the root authorization policy ``urn:li:dataHubPolicy:0``, which
+        GMS writes into ``metadata_aspect_v2`` on its first start after SystemUpdate
+        and which authorizes the admin user's GraphQL session.
 
         Args:
             context: Context for the service.
@@ -799,6 +1008,9 @@ class GMSService(AbstractService):
 
         Returns:
             Whether the DataHub backend has been provisioned.
+
+        Raises:
+            BackendUnreachableError: If psql cannot connect to the database.
         """
         db_conn = context.charm.db_relation.connection
         if db_conn is None:
@@ -825,6 +1037,13 @@ class GMSService(AbstractService):
                 environment=environment,
             )
             stdout, _ = process.wait_output()
+        except ops.pebble.ExecError as e:
+            # psql exits 2 when it cannot connect or log in. It exits 1 on an SQL error, such
+            # as a missing table in a database that has not been bootstrapped yet.
+            if e.exit_code == 2:
+                raise exceptions.BackendUnreachableError(f"cannot query PostgreSQL: {(e.stderr or '').strip()}") from e
+            logger.info("Backend provisioning check failed, assuming not provisioned: %s", str(e))
+            return False
         except Exception as e:  # noqa: BLE001
             logger.info("Backend provisioning check failed, assuming not provisioned: %s", str(e))
             return False
@@ -946,47 +1165,6 @@ class GMSService(AbstractService):
         logger.debug("Truststore for datahub-gms is up to date")
 
     @classmethod
-    def _run_upgrade(cls, context: ServiceContext, container) -> None:
-        """Run the DataHub SystemUpdate upgrade job.
-
-        This also handles Kafka topic creation (merged upstream).
-
-        Args:
-            context: Context for the service.
-            container: The GMS container reference.
-
-        Raises:
-            InitializationFailedError: If the initialization fails.
-        """
-        # SystemUpdate is the JVM-heavy bootstrap. The caller gates it on
-        # `_backend_is_provisioned` and on GMS not already running, so it runs
-        # against a fresh backend rather than on every reconcile. SystemUpdate is
-        # itself idempotent, so re-running on a not-yet-marked backend is safe
-        # but it is expensive and competes with a booting GMS, hence the gates.
-        logger.info("Running datahub-upgrade job")
-        environment = cls._compile_upgrade_environment(context)
-        try:
-            process = container.exec(
-                [
-                    literals.RUNNER_PATH,
-                    literals.JAVA_BIN_PATH,
-                    "-jar",
-                    literals.UPGRADE_JAR_PATH,
-                    "-u",
-                    "SystemUpdate",
-                ],
-                encoding="utf-8",
-                environment=environment,
-                timeout=600,
-            )
-            process.wait_output()
-        except Exception as e:
-            logger.info("Failed job run for datahub-upgrade: '%s'", str(e))
-            raise exceptions.InitializationFailedError("failed to run jobs for datahub-upgrade")
-
-        logger.info("Successful datahub-upgrade run")
-
-    @classmethod
     def _compile_upgrade_environment(cls, context: ServiceContext) -> Dict[str, str]:
         """Compile environment variables for the upgrade job.
 
@@ -1014,7 +1192,7 @@ class GMSService(AbstractService):
             "ELASTICSEARCH_INDEX_BUILDER_MAPPINGS_REINDEX": "true",
             "ELASTICSEARCH_INDEX_BUILDER_SETTINGS_REINDEX": "true",
             "ELASTICSEARCH_BUILD_INDICES_ALLOW_DOC_COUNT_MISMATCH": "false",
-            "ENTITY_REGISTRY_CONFIG_PATH": "/datahub/datahub-gms/resources/entity-registry.yml",
+            "ENTITY_REGISTRY_CONFIG_PATH": literals.ENTITY_REGISTRY_PATH,
             "DATAHUB_GMS_HOST": "localhost",
             "DATAHUB_GMS_PORT": "8080",
             "EBEAN_DATASOURCE_USERNAME": db_conn["username"],

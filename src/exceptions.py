@@ -16,6 +16,22 @@ class UnreadyStateError(Exception):
     """Raised when the charm is not ready due to its state."""
 
 
+class BackendDriftError(Exception):
+    """Raised when a backend lacks something the SystemUpdate job creates."""
+
+
+class BackendRestoringError(Exception):
+    """Raised while the SystemUpdate job runs to restore the backends."""
+
+
+class BackendRetryingError(Exception):
+    """Raised while pebble waits to rerun a SystemUpdate job that failed."""
+
+
+class BackendUnreachableError(Exception):
+    """Raised when a backend cannot be queried."""
+
+
 class BadLogicError(Exception):
     """Raised when a state deemed impossible is reached.
 

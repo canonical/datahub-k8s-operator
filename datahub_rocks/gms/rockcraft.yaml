@@ -82,7 +82,8 @@ parts:
       # Gradle's git-properties plugin to set git.commit.id.describe=null,
       # which DataHub surfaces as "version": "null" in the /config endpoint.
       # Recreate the release tag locally before the build so the plugin
-      # resolves it correctly.
+      # resolves it correctly. SystemUpdate records this tag in DataHubUpgradeHistory_v1
+      # and the charm's upgrade probe matches that record against `version` above.
       git tag "v${CRAFT_PROJECT_VERSION}"
 
       # ── Gradle build ────────────────────────────────────────────────
