@@ -167,11 +167,11 @@ config:
         Each value is an object with "retention-ms" and/or "retention-bytes",
         for example: '{"metadata-change-proposal": {"retention-ms": 259200000}}'.
 
-        A topic or setting left out of the value keeps its default above: 7 days
-        for every topic except "metadata-change-log-timeseries", which keeps
-        DataHub's 90 days, and no size limit. DataHub's consumers must read a
-        message before it expires, so keep "retention-ms" longer than any
-        outage of DataHub.
+        Default value for omitted topics or settings is 7 days. One exception to
+        this is "metadata-change-log-timeseries", which keeps DataHub's default
+        90 days, and does not set a size limit. DataHub's consumers must read a
+        message before it expires, so configure "retention-ms" to be longer than
+        the duration for which DataHub may be unavailable.
         "retention-bytes" applies per partition, and Kafka only deletes a whole
         segment once it is closed, so a partition can hold up to "retention-bytes"
         plus one segment (1 GB by default).
