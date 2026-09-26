@@ -47,6 +47,25 @@ OPENSEARCH_SENTINELS = (
     "datahub_usage_event",
 )
 
+# `kafka-topic-retention`: the topics whose retention the charm manages, keyed by the name that
+# the option uses, with the environment variable that holds each topic's name. The upgrade history
+# topic is left out: GMS waits at startup for the record of its version, which can be months old.
+KAFKA_RETENTION_TOPICS = {
+    "metadata-change-proposal": "METADATA_CHANGE_PROPOSAL_TOPIC_NAME",
+    "failed-metadata-change-proposal": "FAILED_METADATA_CHANGE_PROPOSAL_TOPIC_NAME",
+    "metadata-change-log-versioned": "METADATA_CHANGE_LOG_VERSIONED_TOPIC_NAME",
+    "metadata-change-log-timeseries": "METADATA_CHANGE_LOG_TIMESERIES_TOPIC_NAME",
+    "platform-event": "PLATFORM_EVENT_TOPIC_NAME",
+    "usage-event": "DATAHUB_USAGE_EVENT_NAME",
+}
+KAFKA_RETENTION_KEYS = {"retention-ms": "retention.ms", "retention-bytes": "retention.bytes"}
+KAFKA_RETENTION_MS_DEFAULT = 7 * 24 * 60 * 60 * 1000  # 7 days
+KAFKA_RETENTION_DEFAULTS = {
+    **{topic: {"retention-ms": KAFKA_RETENTION_MS_DEFAULT} for topic in KAFKA_RETENTION_TOPICS},
+    # DataHub creates this topic with 90 days.
+    "metadata-change-log-timeseries": {"retention-ms": 90 * 24 * 60 * 60 * 1000},
+}
+
 # OAuth/OIDC via the `oauth` relation (Canonical Identity Platform or an
 # external IdP integrator). The callback path is fixed by the DataHub frontend.
 OAUTH_RELATION_NAME = "oauth"

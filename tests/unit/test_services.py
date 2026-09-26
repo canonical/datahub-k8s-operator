@@ -549,6 +549,7 @@ class TestGMSRunInitialization:
                 "_set_workload_version": {},
                 "_backend_is_provisioned": {"return_value": provisioned},
                 "_backend_drift": {"return_value": list(drift)},
+                "_set_kafka_retention": {},
                 "_upgrade_status": {"return_value": job},
                 "_upgrade_last_exit": {"return_value": last_exit},
                 "_upgrade_environment_changed": {"return_value": env_changed},
@@ -586,11 +587,18 @@ class TestGMSRunInitialization:
         assert isinstance(error, exceptions.BackendRestoringError)
         assert str(error) == "upgrade job running: missing Kafka topics: X"
 
+    def test_retention_is_set_on_the_leader_whatever_the_drift(self):
+        """Retention is applied to the topics that exist, also while others are being restored."""
+        for drift in ((), ["missing Kafka topics: X"]):
+            mocks, _ = self._run(drift=drift)
+            mocks["_set_kafka_retention"].assert_called_once()
+
     def test_running_job_is_reported_and_not_started_again(self):
         """While the job runs nothing else is decided."""
         mocks, error = self._run(drift=["missing Kafka topics: X"], job="active")
         mocks["_start_upgrade"].assert_not_called()
         mocks["_backend_drift"].assert_not_called()
+        mocks["_set_kafka_retention"].assert_not_called()
         assert isinstance(error, exceptions.BackendRestoringError)
 
     def test_unprovisioned_backend_runs_the_job(self):
@@ -901,3 +909,20 @@ class TestGMSBackendDrift:
             raise ops.pebble.PathError("not-found", path)
 
         assert services.GMSService._entity_names(SimpleNamespace(pull=_pull)) is None
+
+
+class TestSetKafkaRetention:
+    """Tests for GMSService._set_kafka_retention."""
+
+    def test_option_is_mapped_to_prefixed_topic_configs(self):
+        """Option keys become topic names with the prefix, and an unset size limit is removed."""
+        charm = _make_charm()
+        charm.config.kafka_topic_prefix = "dh"
+        charm.config.kafka_topic_retention = '{"usage-event": {"retention-bytes": 1073741824}}'
+        with patch.object(services.backend_probes, "kafka_set_retention", return_value=[]) as mock_set:
+            services.GMSService._set_kafka_retention(services.ServiceContext(charm=charm))
+        retention = mock_set.call_args.args[1]
+        assert "dh_DataHubUpgradeHistory_v1" not in retention
+        assert retention["dh_DataHubUsageEvent_v1"] == {"retention.ms": "604800000", "retention.bytes": "1073741824"}
+        assert retention["dh_MetadataChangeProposal_v1"] == {"retention.ms": "604800000", "retention.bytes": None}
+        assert retention["dh_MetadataChangeLog_Timeseries_v1"]["retention.ms"] == "7776000000"

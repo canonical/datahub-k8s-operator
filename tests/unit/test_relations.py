@@ -211,3 +211,13 @@ class TestOpenSearchConnection:
         rel._on_opensearch_changed(MagicMock())
         rel._on_relation_broken(MagicMock())
         assert charm.reconcile.call_count == 2
+
+
+def test_connection_is_read_once_per_hook():
+    """Each hook builds a new charm, so the relation data and secrets are fetched once per hook."""
+    data = {"endpoints": "kafka-a:9092", "username": "u", "password": "p"}  # nosec B105
+    charm = _charm_with_relation("kafka", relation_data=data)
+    relation = KafkaRelation.__new__(KafkaRelation)
+    relation.charm = charm
+    assert relation.connection == relation.connection
+    charm.kafka.fetch_relation_data.assert_called_once()

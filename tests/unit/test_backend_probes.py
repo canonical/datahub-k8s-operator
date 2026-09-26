@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from kafka.admin import AlterConfigOp
 from kafka.errors import KafkaTimeoutError
 from kafka.structs import TopicPartition
 
@@ -134,6 +135,69 @@ class TestKafkaSocketErrors:
         with patch.object(backend_probes, "KafkaAdminClient", side_effect=OSError("network unreachable")):
             with pytest.raises(exceptions.BackendUnreachableError):
                 backend_probes.kafka_drift(KAFKA_CONN, TOPICS, HISTORY, VERSION)
+
+
+class TestKafkaSetRetention:
+    """Tests for backend_probes.kafka_set_retention.
+
+    Attributes:
+        MCP: A topic whose retention the charm manages.
+    """
+
+    MCP = "MetadataChangeProposal_v1"
+
+    def _set(self, retention, current, topics=(MCP,), results=None):
+        """Run kafka_set_retention against topics whose own configs are ``current``."""
+        admin = MagicMock()
+        admin.list_topics.return_value = list(topics)
+        admin.describe_configs.return_value = {
+            "topic": {t: {k: {"value": v} for k, v in configs.items()} for t, configs in current.items()}
+        }
+        admin.alter_configs.side_effect = lambda resources, **_: {
+            "topic": results or {resource.name: "OK" for resource in resources}
+        }
+        with patch.object(backend_probes, "KafkaAdminClient", return_value=admin):
+            return backend_probes.kafka_set_retention(KAFKA_CONN, retention), admin
+
+    def test_matching_topic_is_not_altered(self):
+        """Nothing is sent when the topic has the retention and no size limit of its own."""
+        changes, admin = self._set(
+            {self.MCP: {"retention.ms": "604800000", "retention.bytes": None}},
+            {self.MCP: {"retention.ms": "604800000"}},
+        )
+        assert changes == []
+        admin.alter_configs.assert_not_called()
+
+    def test_only_differing_configs_are_altered_incrementally(self):
+        """A new value is set and an unconfigured size limit removed; other configs stay."""
+        changes, admin = self._set(
+            {self.MCP: {"retention.ms": "604800000", "retention.bytes": None}},
+            {self.MCP: {"retention.ms": "-1", "retention.bytes": "1024", "max.message.bytes": "5242880"}},
+        )
+        (resource,) = admin.alter_configs.call_args.args[0]
+        assert resource.configs == {
+            "retention.ms": (AlterConfigOp.SET, "604800000"),
+            "retention.bytes": (AlterConfigOp.DELETE, None),
+        }
+        assert admin.alter_configs.call_args.kwargs["incremental"] is True
+        assert changes == [f"{self.MCP}: retention.ms=604800000, retention.bytes removed"]
+
+    def test_missing_topic_is_skipped(self):
+        """A topic that does not exist yet is left to the upgrade job, which creates it."""
+        changes, admin = self._set({self.MCP: {"retention.ms": "1"}}, {}, topics=())
+        assert changes == []
+        admin.describe_configs.assert_not_called()
+
+    def test_rejected_change_is_unreachable(self):
+        """A change that the broker refuses is reported, not swallowed."""
+        with pytest.raises(exceptions.BackendUnreachableError, match="PolicyViolation"):
+            self._set({self.MCP: {"retention.ms": "1"}}, {self.MCP: {}}, results={self.MCP: "PolicyViolation"})
+
+    def test_kafka_error_is_unreachable(self):
+        """A connection failure is reported as an unreachable backend."""
+        with patch.object(backend_probes, "KafkaAdminClient", side_effect=KafkaTimeoutError("no brokers")):
+            with pytest.raises(exceptions.BackendUnreachableError, match="cannot set Kafka topic retention"):
+                backend_probes.kafka_set_retention(KAFKA_CONN, {self.MCP: {"retention.ms": "1"}})
 
 
 class TestOpenSearchDrift:

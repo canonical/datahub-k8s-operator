@@ -7,6 +7,7 @@
 import json
 import logging
 import secrets
+from functools import cached_property
 from typing import Dict, List, Type, Union
 from urllib.parse import urlparse
 
@@ -33,7 +34,7 @@ from relations.oauth import OauthRelation
 from relations.opensearch import OpenSearchRelation
 from relations.postgresql import PostgresqlRelation
 from relations.trino import TrinoRelation
-from structured_config import CharmConfig
+from structured_config import CharmConfig, parse_kafka_topic_retention
 
 logger = logging.getLogger(__name__)
 
@@ -201,9 +202,9 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         """Return the DataHub system client identifier."""
         return literals.SYSTEM_CLIENT_ID
 
-    @property
+    @cached_property
     def system_client_secret(self) -> str:
-        """Return the DataHub system client secret."""
+        """Return the DataHub system client secret, read once per hook."""
         return self._get_or_create_system_client_secret()
 
     def _on_pebble_ready(self, event: ops.PebbleReadyEvent):
@@ -479,6 +480,11 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             raise exceptions.UnreadyStateError(f"invalid 'trino-patterns' config: {e}") from None
         if not isinstance(parsed, dict):
             raise exceptions.UnreadyStateError("invalid 'trino-patterns' config: must be a JSON object")
+
+        try:
+            parse_kafka_topic_retention(self.config.kafka_topic_retention)
+        except ValueError as e:
+            raise exceptions.UnreadyStateError(f"invalid 'kafka-topic-retention' config: {e}") from None
 
         if self.oauth_relation.is_related:
             self._check_oidc_requires_https()

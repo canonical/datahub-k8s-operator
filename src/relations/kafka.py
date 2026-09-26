@@ -3,6 +3,7 @@
 
 """Define DataHub-Kafka relation."""
 
+from functools import cached_property
 from typing import Dict, Optional
 
 from ops import framework
@@ -11,8 +12,8 @@ from ops import framework
 class KafkaRelation(framework.Object):
     """Client for datahub:kafka relations.
 
-    Stateless: connection details are read live from the data_platform_libs
-    requirer rather than cached in peer data.
+    Stateless: connection details are read from the data_platform_libs requirer once per
+    hook and are never kept in peer data.
 
     Attributes:
         charm: The charm this relation is attached to.
@@ -32,7 +33,7 @@ class KafkaRelation(framework.Object):
         charm.framework.observe(charm.kafka.on.topic_created, self._on_kafka_changed)
         charm.framework.observe(charm.on.kafka_relation_broken, self._on_relation_broken)
 
-    @property
+    @cached_property
     def connection(self) -> Optional[Dict[str, str]]:
         """Return the current Kafka connection details, or None when unrelated.
 

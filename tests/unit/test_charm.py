@@ -195,6 +195,20 @@ class TestSystemClientSecret:
             assert mgr.charm.system_client_secret == ""  # nosec B105
 
 
+def test_check_state_rejects_invalid_kafka_topic_retention(charm_ctx, base_state):
+    """An invalid `kafka-topic-retention` blocks the charm with the reason."""
+    state = testing.State(config={**base_state.config, "kafka-topic-retention": '{"upgrade-history": {}}'})
+    with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+        with patch.object(
+            mgr.charm.model, "get_secret", return_value=TestCheckStateTrinoPatterns._encryption_secret_mock()
+        ):
+            _stub_connections(mgr.charm)
+            with pytest.raises(
+                exceptions.UnreadyStateError, match="invalid 'kafka-topic-retention' config: unknown topics"
+            ):
+                mgr.charm._check_state()
+
+
 class TestCheckStateTrinoPatterns:
     """Tests for trino-patterns config validation in _check_state."""
 
