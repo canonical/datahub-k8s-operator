@@ -38,4 +38,6 @@ header:
     - 'datahub_rocks/frontend/files/**'
     - 'datahub_rocks/gms/files/**'
     - 'uv.lock'
+    - 'apm.lock.yaml'
+    - '**/keyring_broker.py'
   comment: on-failure
