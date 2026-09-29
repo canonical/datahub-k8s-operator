@@ -143,11 +143,13 @@ parts:
         "${CRAFT_PART_INSTALL}/tmp/kafka.client.truststore.jks"
 
   # OpenTelemetry Java agent, placed at / per upstream Dockerfile.
+  # 2.31.1 fixes CVE-2026-33701, CVE-2026-54712 and CVE-2026-54704, and bundles
+  # opentelemetry-sdk 1.65.0 (CVE-2026-45292 fixed in 1.62.0).
   opentelemetry-agent:
     plugin: dump
-    source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.15.0/opentelemetry-javaagent.jar
+    source: https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.31.1/opentelemetry-javaagent.jar
     source-type: file
-    source-checksum: sha256/7ecffb5fdda5d2e0fd0125abaffa218146a23dc2402d5c7b30cf5a2f2c3ff241
+    source-checksum: sha256/bbf83c151b6400709e2f225bdd07a04f839d9d13b8b93464241333fd25d3e3ba
     organize:
       opentelemetry-javaagent.jar: opentelemetry-javaagent.jar
 
