@@ -4,8 +4,16 @@ on:
   push:
     branches:
       - main
+    # Keep the APM entries in sync with extra-ignored-file-patterns in
+    # integration_test.yaml: integration tests skip these changes, so there
+    # is no build to publish.
     paths-ignore:
       - "bundle/**"
+      - "apm.yml"
+      - "apm.lock.yaml"
+      - ".agents/**"
+      - ".github/agents/**"
+      - ".github/instructions/**"
   workflow_dispatch:
 
 run-name: Release charm by @${{ github.actor }}
