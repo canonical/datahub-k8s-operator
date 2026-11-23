@@ -64,6 +64,8 @@ def test_charm_publishes_single_dashboard_for_its_model(charm_ctx, base_state):
     dashboard = json.loads(LZMABase64.decompress(next(iter(templates.values()))["content"]))
     expected = [out.model.name]
     assert _variables(dashboard)["juju_model"]["current"]["value"] == expected
+    # Same uid the lib generated when the template was loaded from the old dir.
+    assert dashboard["uid"] == "d5897cfa2e64e3ac448fab993640ba2b25a30c3e"
 
 
 def test_charm_drops_stale_dashboard_from_stored_state(charm_ctx, base_state):

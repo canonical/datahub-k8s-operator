@@ -204,6 +204,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 Path(__file__).parent / "dashboard_templates" / "datahub-monitoring.json.tmpl",
                 self.model.name,
                 self.model.uuid,
+                self.meta.name,
             )
         )
         self.log_forwarder = LogForwarder(self, relation_name="logging")
