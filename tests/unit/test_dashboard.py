@@ -56,7 +56,7 @@ def test_charm_publishes_single_dashboard_for_its_model(charm_ctx, base_state):
     relation = testing.Relation("grafana-dashboard", interface="grafana_dashboard")
     state = testing.State(config=base_state.config, relations=[relation], leader=True)
 
-    out = charm_ctx.run(charm_ctx.on.update_status(), state)
+    out = charm_ctx.run(charm_ctx.on.config_changed(), state)
 
     out_relation = out.get_relation(relation.id)
     templates = json.loads(out_relation.local_app_data["dashboards"])["templates"]
@@ -64,3 +64,27 @@ def test_charm_publishes_single_dashboard_for_its_model(charm_ctx, base_state):
     dashboard = json.loads(LZMABase64.decompress(next(iter(templates.values()))["content"]))
     expected = [out.model.name]
     assert _variables(dashboard)["juju_model"]["current"]["value"] == expected
+
+
+def test_charm_drops_stale_dashboard_from_stored_state(charm_ctx, base_state):
+    """A dashboard kept in stored state from an earlier render is not published."""
+    stale = {
+        "charm": "datahub-k8s",
+        "content": "x",
+        "juju_topology": {},
+        "inject_dropdowns": True,
+        "dashboard_alt_uid": "stale",
+    }
+    stored = testing.StoredState(
+        owner_path="DatahubK8SOperatorCharm/GrafanaDashboardProvider[grafana-dashboard]",
+        name="_stored",
+        content={"dashboard_templates": {"prog:STALE123": stale}},
+    )
+    relation = testing.Relation("grafana-dashboard", interface="grafana_dashboard")
+    state = testing.State(config=base_state.config, relations=[relation], leader=True, stored_states={stored})
+
+    out = charm_ctx.run(charm_ctx.on.update_status(), state)
+
+    templates = json.loads(out.get_relation(relation.id).local_app_data["dashboards"])["templates"]
+    assert len(templates) == 1
+    assert "prog:STALE123" not in templates

@@ -197,6 +197,8 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             refresh_event=self.on.config_changed,
         )
         self.grafana_dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
+        # Drop dashboards kept in stored state by earlier renders.
+        self.grafana_dashboards.remove_non_builtin_dashboards()
         self.grafana_dashboards.add_dashboard(
             render_dashboard(
                 Path(__file__).parent / "dashboard_templates" / "datahub-monitoring.json.tmpl",
