@@ -1,0 +1,3 @@
+# sqlglotc 29.0.1 was deleted from PyPI (tobymao/sqlglot#8482); build it from
+# the v29.0.1 commit to match DataHub's sqlglot[c]==29.0.1.
+sqlglotc @ git+https://github.com/tobymao/sqlglot@21a2a5773717f675963dddbdba3df9343da60abe#subdirectory=sqlglotc
