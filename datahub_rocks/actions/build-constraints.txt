@@ -1,0 +1,7 @@
+# Build constraints for uv, used together with DataHub's own
+# metadata-ingestion/build-constraints.txt (see rockcraft.yaml).
+
+# sqlglot[c]==29.0.1 pulls in sqlglotc 30.10.0, which PyPI now has only as an
+# sdist. Building it compiles the sqlglot installed in the build env, and newer
+# sqlglot releases fail in mypyc. Pin the version sqlglotc 30.10.0 targets.
+sqlglot==30.10.0

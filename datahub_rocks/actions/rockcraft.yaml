@@ -37,10 +37,21 @@ parts:
     stage:
       - rockcraft.yaml
 
+  # Our build constraints for uv, used next to DataHub's own; build only.
+  build-constraints:
+    plugin: dump
+    source: .
+    stage:
+      - build-constraints.txt
+    prime:
+      - -*
+
   # Clone DataHub v1.4.0, build the primary virtualenv with
   # datahub-actions + metadata-ingestion, create bundled ingestion venvs
   # for the selected plugins, and stage scripts + config.
   datahub-actions-build:
+    after:
+      - build-constraints
     plugin: nil
     source: https://github.com/acryldata/datahub.git
     source-commit: 32b131fa42c03893a329fe8b0075b14cdac7ce0b # v1.4.0.5
@@ -64,7 +75,8 @@ parts:
       - python3.11-dev
       - python3.11-venv
     build-environment:
-      - UV_BUILD_CONSTRAINT: "${CRAFT_PART_SRC}/metadata-ingestion/build-constraints.txt"
+      # space-separated list of files (uv docs, UV_BUILD_CONSTRAINT)
+      - UV_BUILD_CONSTRAINT: "${CRAFT_PART_SRC}/metadata-ingestion/build-constraints.txt ${CRAFT_STAGE}/build-constraints.txt"
     override-build: |
       set -eu
 
