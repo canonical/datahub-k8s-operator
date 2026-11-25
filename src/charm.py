@@ -8,6 +8,7 @@ import json
 import logging
 import secrets
 from functools import cached_property
+from pathlib import Path
 from typing import Dict, List, Type, Union
 from urllib.parse import urlparse
 
@@ -28,6 +29,7 @@ import exceptions
 import literals
 import services
 import utils
+from dashboard import render_dashboard
 from relations.datahub_client import DatahubClientRelation
 from relations.kafka import KafkaRelation
 from relations.oauth import OauthRelation
@@ -195,6 +197,16 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
             refresh_event=self.on.config_changed,
         )
         self.grafana_dashboards = GrafanaDashboardProvider(self, relation_name="grafana-dashboard")
+        # Drop dashboards kept in stored state by earlier renders.
+        self.grafana_dashboards.remove_non_builtin_dashboards()
+        self.grafana_dashboards.add_dashboard(
+            render_dashboard(
+                Path(__file__).parent / "dashboard_templates" / "datahub-monitoring.json.tmpl",
+                self.model.name,
+                self.model.uuid,
+                self.meta.name,
+            )
+        )
         self.log_forwarder = LogForwarder(self, relation_name="logging")
 
     @property
