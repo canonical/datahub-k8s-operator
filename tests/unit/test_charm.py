@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import ops
 import pytest
 from ops import testing
+from ops.pebble import CheckStatus
 
 import exceptions
 import literals
@@ -671,3 +672,40 @@ class TestReconcileTriggers:
         ):
             charm_ctx.run(getattr(charm_ctx.on, event)(container, check), state)
         refresh.assert_called_once()
+
+
+class TestGcReconcile:
+    """The leader keeps the `datahub-gc` ingestion source runnable once GMS is up."""
+
+    def _run(self, charm_ctx, base_state, *, leader, check_status):
+        """Call the gc reconcile step with the GMS `up` check in the given state.
+
+        Returns:
+            The mock standing in for `datahub_gc.reconcile_gc_source`.
+        """
+        container = MagicMock()
+        container.get_check.return_value = SimpleNamespace(status=check_status)
+        state = testing.State(config=base_state.config, leader=leader)
+        with charm_ctx(charm_ctx.on.update_status(), state) as mgr:
+            with (
+                patch.object(mgr.charm.unit, "get_container", return_value=container),
+                patch.object(DatahubK8SOperatorCharm, "system_client_secret", "secret"),
+                patch("datahub_gc.reconcile_gc_source", return_value=True) as mock_reconcile,
+            ):
+                mgr.charm._reconcile_gc_if_ready()
+        return mock_reconcile
+
+    def test_leader_reconciles_when_gms_is_up(self, charm_ctx, base_state):
+        """The leader updates the source through the system client."""
+        mock_reconcile = self._run(charm_ctx, base_state, leader=True, check_status=CheckStatus.UP)
+        mock_reconcile.assert_called_once_with(literals.SYSTEM_CLIENT_ID, "secret")
+
+    def test_skipped_while_gms_is_down(self, charm_ctx, base_state):
+        """No request is made to a GMS that is not answering."""
+        mock_reconcile = self._run(charm_ctx, base_state, leader=True, check_status=CheckStatus.DOWN)
+        mock_reconcile.assert_not_called()
+
+    def test_follower_does_nothing(self, charm_ctx, base_state):
+        """Only the leader writes to DataHub."""
+        mock_reconcile = self._run(charm_ctx, base_state, leader=False, check_status=CheckStatus.UP)
+        mock_reconcile.assert_not_called()

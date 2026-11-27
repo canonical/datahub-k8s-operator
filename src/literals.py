@@ -81,6 +81,8 @@ SYSTEM_ACTOR_URN = f"urn:li:corpuser:{SYSTEM_CLIENT_ID}"
 INGESTION_TOKEN_SECRET_LABEL = "datahub-ingestion-token"  # nosec B105
 INGESTION_TOKEN_NAME = "juju-managed-ingestion-token"  # nosec B105
 DEFAULT_EXECUTOR_ID = "default"
+# Ingestion source GMS creates from its `ingestion-datahub-gc` bootstrap template.
+GC_INGESTION_SOURCE_URN = "urn:li:dataHubIngestionSource:datahub-gc"
 
 # `datahub_client` relation: one DataHub service account and one Juju secret
 # holding its access token, per relation.

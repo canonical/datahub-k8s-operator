@@ -319,6 +319,46 @@ def list_ingestion_sources(bearer_token: str) -> List[Dict[str, Any]]:
     return all_sources
 
 
+def get_ingestion_source(token: str, urn: str, auth_scheme: str = "Bearer") -> Optional[Dict[str, Any]]:
+    """Fetch one ingestion source from DataHub.
+
+    Args:
+        token: Authentication token or credentials.
+        urn: URN of the ingestion source.
+        auth_scheme: HTTP auth scheme (e.g. "Bearer" or "Basic").
+
+    Returns:
+        The ingestion source dictionary, or None if it does not exist.
+    """
+    query = textwrap.dedent("""\
+        query ingestionSource($urn: String!) {
+            ingestionSource(urn: $urn) {
+                urn
+                name
+                type
+                config {
+                    recipe
+                    executorId
+                    version
+                    debugMode
+                    extraArgs {
+                        key
+                        value
+                    }
+                }
+                schedule {
+                    interval
+                    timezone
+                }
+                source {
+                    type
+                }
+            }
+        }""")
+    body = _graphql_request(query, {"urn": urn}, token, auth_scheme=auth_scheme)
+    return body["data"]["ingestionSource"]
+
+
 def create_ingestion_source(
     bearer_token: str,
     input_data: Dict[str, Any],
@@ -345,20 +385,22 @@ def update_ingestion_source(
     bearer_token: str,
     urn: str,
     input_data: Dict[str, Any],
+    auth_scheme: str = "Bearer",
 ) -> None:
     """Update an existing ingestion source in DataHub.
 
     Args:
-        bearer_token: Bearer token for authentication.
+        bearer_token: Bearer token for authentication, or credentials for the given scheme.
         urn: URN of the existing ingestion source.
         input_data: Pre-built UpdateIngestionSourceInput dict.
+        auth_scheme: HTTP auth scheme (e.g. "Bearer" or "Basic").
     """
     query = textwrap.dedent("""\
         mutation updateIngestionSource($urn: String!, $input: UpdateIngestionSourceInput!) {
             updateIngestionSource(urn: $urn, input: $input)
         }""")
     variables: Dict[str, Any] = {"urn": urn, "input": input_data}
-    _graphql_request(query, variables, bearer_token)
+    _graphql_request(query, variables, bearer_token, auth_scheme=auth_scheme)
 
 
 def delete_ingestion_source(bearer_token: str, urn: str) -> None:

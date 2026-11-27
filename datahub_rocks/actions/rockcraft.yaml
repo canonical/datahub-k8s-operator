@@ -138,6 +138,13 @@ parts:
       done
 
       # ── Collect artefacts ───────────────────────────────────────────
+      # The ingestion executor creates venvs at runtime from
+      # /opt/datahub/venv/bin/python, and uv links them to the base
+      # interpreter its pyvenv.cfg names (home = /usr/bin).
+      mkdir -p "${CRAFT_PART_INSTALL}/usr/bin"
+      cp "${real_python}" "${CRAFT_PART_INSTALL}/usr/bin/python3.11"
+      ln -s python3.11 "${CRAFT_PART_INSTALL}/usr/bin/python3"
+      ln -s python3.11 "${CRAFT_PART_INSTALL}/usr/bin/python"
       mkdir -p "${CRAFT_PART_INSTALL}/opt/datahub"
       cp -a /opt/datahub/venv  "${CRAFT_PART_INSTALL}/opt/datahub/venv"
       cp -a /opt/datahub/venvs "${CRAFT_PART_INSTALL}/opt/datahub/venvs"
