@@ -24,6 +24,7 @@ from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 from ops.pebble import CheckStatus
 
+import datahub_gc
 import exceptions
 import literals
 import services
@@ -410,6 +411,22 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
         except Exception as e:
             logger.error("Trino reconciliation failed: %s", str(e))
 
+    def _reconcile_gc_if_ready(self):
+        """Keep the `datahub-gc` ingestion source runnable once GMS answers."""
+        if not self.unit.is_leader():
+            return
+        container = self.unit.get_container(services.GMSService.name)
+        try:
+            if container.get_check("up").status != CheckStatus.UP:
+                return
+        except (ops.ModelError, ops.pebble.ConnectionError):
+            return
+        try:
+            if datahub_gc.reconcile_gc_source(self.system_client_id, self.system_client_secret):
+                logger.info("Updated ingestion source '%s'", literals.GC_INGESTION_SOURCE_URN)
+        except Exception as e:
+            logger.error("datahub-gc reconciliation failed: %s", str(e))
+
     def _reconcile_datahub_clients_if_ready(self):
         """Provision DataHub API clients if preconditions are met."""
         if not self.unit.is_leader():
@@ -623,6 +640,7 @@ class DatahubK8SOperatorCharm(TypedCharmBase[CharmConfig]):
                 return
 
         self._reconcile_trino_if_ready()
+        self._reconcile_gc_if_ready()
         self._reconcile_datahub_clients_if_ready()
 
         self.unit.status = backend_status or ops.ActiveStatus()
